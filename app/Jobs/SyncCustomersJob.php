@@ -92,8 +92,14 @@ class SyncCustomersJob implements ShouldQueue
 
     private function mapCustomer(int $shopId, array $raw): array
     {
-        $addr     = $raw['shop_customer_addresses'][0] ?? [];
+        $addr      = $raw['shop_customer_addresses'][0] ?? [];
         $addrParts = $this->parseAddressParts($addr['full_address'] ?? null);
+
+        // Prefer structured province/district/ward fields from Pancake if present;
+        // fall back to comma-parsing the full_address string only when they're absent.
+        $province = $addr['province_name'] ?? $addr['city_name'] ?? $addrParts['province'];
+        $district = $addr['district_name'] ?? $addrParts['district'];
+        $ward     = $addr['commune_name']  ?? $addr['ward_name'] ?? $addrParts['ward'];
 
         return [
             'shop_id'         => $shopId,
@@ -103,9 +109,9 @@ class SyncCustomersJob implements ShouldQueue
             'email'           => $raw['emails'][0] ?? null,
             'gender'          => $raw['gender'] ?? null,
             'birthday'        => $this->parseDate($raw['date_of_birth'] ?? null),
-            'province'        => $addrParts['province'],
-            'district'        => $addrParts['district'],
-            'ward'            => $addrParts['ward'],
+            'province'        => $province,
+            'district'        => $district,
+            'ward'            => $ward,
             'address'         => $addr['full_address'] ?? null,
             'customer_level'  => $raw['level'] ?? null,
             'is_new_customer' => (int)($raw['succeed_order_count'] ?? $raw['order_count'] ?? 0) === 0,

@@ -26,7 +26,7 @@ class DashboardController extends Controller
         $products      = $this->getProducts($shop->id);
         $datePreset    = $this->detectDatePreset($dateFrom, $dateTo);
 
-        $cacheKey = "dashboard_{$shop->id}_{$dateFrom}_{$dateTo}_{$productFilter}";
+        $cacheKey = "dashboard_{$shop->id}_{$this->shopCacheBust($shop->id)}_{$dateFrom}_{$dateTo}_{$productFilter}";
         $cached = Cache::remember($cacheKey, 300, function () use ($shop, $dateFrom, $dateTo, $productFilter) {
             return [
                 'kpis'             => $this->getKpis($shop->id, $dateFrom, $dateTo, $productFilter),

@@ -5,7 +5,6 @@ use App\Jobs\SyncOrdersJob;
 use App\Models\PancakeShop;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class WebhookController extends Controller
@@ -47,10 +46,8 @@ class WebhookController extends Controller
         $fromDate = now()->subMinutes(15)->format('Y-m-d H:i:s');
         dispatch(new SyncOrdersJob($shop->id, $fromDate));
 
-        // Clear dashboard cache so next page load reflects the change immediately
-        foreach (['dashboard', 'rts', 'customers'] as $prefix) {
-            Cache::forget("{$prefix}_{$shop->id}_*");
-        }
+        // Bust the shop cache token so all controllers generate fresh cache keys on next load
+        $this->bustShopCache($shop->id);
 
         $this->startQueueWorker();
 

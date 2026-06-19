@@ -7,11 +7,12 @@
     <title>SH Customer's Analytics — @yield('title', 'Dashboard')</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     <style>
-        body { font-family: 'Inter', sans-serif; background: #F1F5F9; }
-        .font-display { font-family: 'Space Grotesk', sans-serif; }
+        body { font-family: 'Fira Sans', sans-serif; background: #F1F5F9; }
+        .font-display { font-family: 'Fira Sans', sans-serif; font-weight: 600; }
+        .font-mono, [class*="font-mono"] { font-family: 'Fira Code', monospace; }
         :root {
             --gold: #F5A623;
             --gold-dark: #D4891A;
@@ -20,6 +21,60 @@
             --dark-2: #1E293B;
             --dark-3: #334155;
         }
+
+        /* Skeleton shimmer */
+        @keyframes shimmer {
+            0%   { background-position: -400px 0; }
+            100% { background-position: 400px 0; }
+        }
+        .skeleton {
+            background: linear-gradient(90deg, #e2e8f0 25%, #f8fafc 50%, #e2e8f0 75%);
+            background-size: 800px 100%;
+            animation: shimmer 1.4s ease-in-out infinite;
+            border-radius: 8px;
+        }
+        .chart-wrap { position: relative; }
+        .chart-skeleton {
+            position: absolute; inset: 0;
+            display: flex; flex-direction: column; gap: 8px; padding: 8px;
+            pointer-events: none;
+        }
+        .chart-skeleton .sk-bar {
+            background: linear-gradient(90deg, #e2e8f0 25%, #f8fafc 50%, #e2e8f0 75%);
+            background-size: 800px 100%;
+            animation: shimmer 1.4s ease-in-out infinite;
+            border-radius: 4px;
+        }
+
+        /* KPI card hover lift */
+        .kpi-card {
+            transition: transform 0.18s ease, box-shadow 0.18s ease;
+            cursor: default;
+        }
+        .kpi-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 12px 28px -6px rgba(0,0,0,0.10), 0 4px 8px -2px rgba(0,0,0,0.06);
+        }
+
+        /* Empty state */
+        .empty-state {
+            display: flex; flex-direction: column; align-items: center;
+            justify-content: center; padding: 40px 20px; text-align: center; gap: 10px;
+        }
+        .empty-state-icon {
+            width: 48px; height: 48px; border-radius: 14px;
+            display: flex; align-items: center; justify-content: center;
+            background: #F1F5F9; margin-bottom: 4px;
+        }
+        .empty-state p.title { font-size: 13px; font-weight: 600; color: #475569; }
+        .empty-state p.hint  { font-size: 12px; color: #94A3B8; max-width: 220px; line-height: 1.5; }
+
+        /* Chart canvas fade-in */
+        .chart-canvas { opacity: 0; transition: opacity 0.3s ease; }
+        .chart-canvas.loaded { opacity: 1; }
+
+        /* Table row hover */
+        tbody tr { transition: background 0.12s ease; }
     </style>
     @stack('head')
 </head>
@@ -129,7 +184,7 @@
     <div class="flex-1 flex flex-col overflow-hidden">
 
         <!-- Top bar -->
-        <header class="h-14 bg-white border-b border-gray-100 flex items-center justify-between px-6 flex-shrink-0 shadow-sm z-10 overflow-visible">
+        <header class="h-14 bg-white border-b border-gray-100 flex items-center justify-between px-6 flex-shrink-0 shadow-sm z-[1001] overflow-visible">
             <div>
                 <h1 class="text-base font-semibold text-gray-900 font-display">@yield('title', 'Dashboard')</h1>
                 <p class="text-xs text-gray-400">@yield('subtitle', '')</p>

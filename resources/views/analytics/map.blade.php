@@ -205,7 +205,10 @@ function updateTable() {
             const item = currentData.find(d => d.name === name);
             const coords = item ? getCoords(item) : null;
             if (coords) {
-                map.setView(coords, currentLevel === 'province' ? 9 : 11, { animate:true });
+                // Pan to the marker but don't over-zoom — keep the user's current zoom
+                // or ease to a sensible max so context stays visible.
+                const maxZoom = { province:8, city:10, barangay:12 }[currentLevel] ?? 10;
+                map.setView(coords, Math.min(map.getZoom(), maxZoom), { animate:true });
                 const idx = currentData.findIndex(d => d.name === name);
                 if (idx >= 0 && markers[idx]) markers[idx].openPopup();
             }
@@ -288,7 +291,24 @@ async function loadData() {
     updateTable();
     updateBreadcrumb();
     updateLevelUI();
+    fitToData();
     isLoading = false;
+}
+
+function fitToData() {
+    const pts = currentData.filter(d => d.lat != null && d.lng != null).map(d => [d.lat, d.lng]);
+    if (!pts.length) {
+        map.fitBounds([[4.5,116.5],[21.0,127.0]], { animate: true });
+        return;
+    }
+    if (pts.length === 1) {
+        const zoom = currentProvinceFilter ? 12 : 9;
+        map.setView(pts[0], zoom, { animate: true });
+        return;
+    }
+    // Cap zoom: stay wide enough to show context; drilled-in province can go closer
+    const maxZoom = currentProvinceFilter ? 13 : (currentLevel === 'province' ? 8 : 9);
+    map.fitBounds(pts, { padding: [36, 36], maxZoom, animate: true });
 }
 
 function setViewMode(mode) {
@@ -316,6 +336,7 @@ if (currentData.length > 0) {
     renderMarkers();
     updateTable();
     updateLevelUI();
+    fitToData();
 }
 </script>
 @endpush

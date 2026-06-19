@@ -20,7 +20,7 @@ class ProductAudienceController extends Controller
 
         $data = null;
         if ($selectedProduct) {
-            $cacheKey = 'product_audience_' . $shop->id . '_' . md5($selectedProduct) . "_{$dateFrom}_{$dateTo}";
+            $cacheKey = 'product_audience_' . $shop->id . '_' . $this->shopCacheBust($shop->id) . '_' . md5($selectedProduct) . "_{$dateFrom}_{$dateTo}";
             $data = Cache::remember($cacheKey, 300, function () use ($shop, $selectedProduct, $dateFrom, $dateTo) {
                 return [
                     'kpis'             => $this->kpis($shop->id, $selectedProduct, $dateFrom, $dateTo),
@@ -28,7 +28,7 @@ class ProductAudienceController extends Controller
                     'gender'           => $this->genderBreakdown($shop->id, $selectedProduct, $dateFrom, $dateTo),
                     'healthConditions' => $this->healthConditions($shop->id, $selectedProduct, $dateFrom, $dateTo),
                     'provinces'        => $this->topProvinces($shop->id, $selectedProduct, $dateFrom, $dateTo),
-                    'newVsReturning'   => $this->newVsReturning($shop->id, $selectedProduct),
+                    'newVsReturning'   => $this->newVsReturning($shop->id, $selectedProduct, $dateFrom, $dateTo),
                     'topCustomers'     => $this->topCustomers($shop->id, $selectedProduct, $dateFrom, $dateTo),
                 ];
             });
@@ -137,17 +137,33 @@ class ProductAudienceController extends Controller
 
     private function healthConditions(int $shopId, string $product, ?string $from, ?string $to): array
     {
-        $rows = (clone $this->baseOrders($shopId, $product, $from, $to))
-            ->whereNotNull('health_condition')
-            ->select('health_condition', DB::raw('COUNT(*) as cnt'))
-            ->groupBy('health_condition')
-            ->orderByDesc('cnt')
-            ->take(12)
-            ->get();
+        // health_condition is stored as a JSON array e.g. ["Cataract","Teary Eyes"].
+        // json_each() expands each element so one order can contribute multiple conditions.
+        // LIKE '[%' guards against any legacy plain-string rows from before the JSON migration.
+        $bindings = [$shopId, $product];
+        $dateWhere = '';
+        if ($from) { $dateWhere .= " AND o.ordered_at >= ?"; $bindings[] = $from . ' 00:00:00'; }
+        if ($to)   { $dateWhere .= " AND o.ordered_at <= ?"; $bindings[] = $to   . ' 23:59:59'; }
+
+        $rows = DB::select("
+            SELECT je.value AS condition, COUNT(*) AS cnt
+            FROM orders o, json_each(o.health_condition) AS je
+            WHERE o.shop_id = ?
+              AND o.health_condition IS NOT NULL
+              AND o.health_condition LIKE '[%'
+              AND EXISTS (
+                  SELECT 1 FROM json_each(o.items) AS item
+                  WHERE json_extract(item.value, '\$.variation_info.name') = ? COLLATE NOCASE
+              )
+              {$dateWhere}
+            GROUP BY je.value
+            ORDER BY cnt DESC
+            LIMIT 12
+        ", $bindings);
 
         return [
-            'labels' => $rows->pluck('health_condition')->toArray(),
-            'data'   => $rows->pluck('cnt')->map(fn($v) => (int) $v)->toArray(),
+            'labels' => array_column($rows, 'condition'),
+            'data'   => array_map('intval', array_column($rows, 'cnt')),
         ];
     }
 
@@ -167,17 +183,20 @@ class ProductAudienceController extends Controller
         ];
     }
 
-    private function newVsReturning(int $shopId, string $product): array
+    private function newVsReturning(int $shopId, string $product, ?string $from, ?string $to): array
     {
-        // Counts whether each customer has bought this product once (new) or more (repeat buyer)
-        $counts = DB::table('orders')
+        $q = DB::table('orders')
             ->where('shop_id', $shopId)
             ->whereNotNull('customer_pancake_id')
             ->whereRaw(
                 "EXISTS (SELECT 1 FROM json_each(items) as item WHERE json_extract(item.value, '$.variation_info.name') = ? COLLATE NOCASE)",
                 [$product]
-            )
-            ->select('customer_pancake_id', DB::raw('COUNT(*) as cnt'))
+            );
+
+        if ($from) $q->where('ordered_at', '>=', $from . ' 00:00:00');
+        if ($to)   $q->where('ordered_at', '<=', $to   . ' 23:59:59');
+
+        $counts = $q->select('customer_pancake_id', DB::raw('COUNT(*) as cnt'))
             ->groupBy('customer_pancake_id')
             ->get();
 
@@ -207,7 +226,7 @@ class ProductAudienceController extends Controller
         return $q->select(
                 'c.name', 'c.phone', 'c.province', 'c.gender',
                 DB::raw('COUNT(o.id) as order_count'),
-                DB::raw('SUM(o.total_price) as spent')
+                DB::raw('SUM(CASE WHEN o.status = \'delivered\' THEN o.total_price ELSE 0 END) as spent')
             )
             ->groupBy('o.customer_pancake_id', 'c.name', 'c.phone', 'c.province', 'c.gender')
             ->orderByDesc('spent')

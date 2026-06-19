@@ -26,15 +26,13 @@ class ExtractOrderDemographics extends Command
             ->orderBy('id')
             ->chunk(500, function ($rows) use ($bar, &$updated) {
                 foreach ($rows as $row) {
-                    $age  = DemographicsExtractor::age($row->extra_note);
-                    $cond = DemographicsExtractor::condition($row->extra_note);
-                    if ($age !== null || $cond !== null) {
-                        DB::table('orders')->where('id', $row->id)->update([
-                            'customer_age'     => $age,
-                            'health_condition' => $cond,
-                        ]);
-                        $updated++;
-                    }
+                    $age   = DemographicsExtractor::age($row->extra_note);
+                    $conds = DemographicsExtractor::conditions($row->extra_note);
+                    DB::table('orders')->where('id', $row->id)->update([
+                        'customer_age'     => $age,
+                        'health_condition' => $conds ? json_encode($conds) : null,
+                    ]);
+                    $updated++;
                     $bar->advance();
                 }
             });

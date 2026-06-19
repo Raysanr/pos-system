@@ -17,7 +17,7 @@ class RtsAnalyticsController extends Controller
         $products      = $this->getProducts($shop->id);
         $datePreset    = $this->detectDatePreset($dateFrom, $dateTo);
 
-        $cacheKey = "rts_{$shop->id}_{$dateFrom}_{$dateTo}_{$productFilter}";
+        $cacheKey = "rts_{$shop->id}_{$this->shopCacheBust($shop->id)}_{$dateFrom}_{$dateTo}_{$productFilter}";
         $cached = Cache::remember($cacheKey, 300, function () use ($shop, $dateFrom, $dateTo, $productFilter) {
             return [
                 'rtsByProvince' => $this->getRtsByProvince($shop->id, $dateFrom, $dateTo, $productFilter),

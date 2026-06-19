@@ -129,7 +129,7 @@ class SyncOrdersJob implements ShouldQueue
             'extra_note'          => $raw['note'] ?? null,
             'return_reason'       => $raw['returned_reason_name'] ?? null,
             'customer_age'        => DemographicsExtractor::age($raw['note'] ?? null),
-            'health_condition'    => DemographicsExtractor::condition($raw['note'] ?? null),
+            'health_condition'    => ($c = DemographicsExtractor::conditions($raw['note'] ?? null)) ? json_encode($c) : null,
             'items'               => $raw['items'] ?? null,
             'utm_data'            => array_filter([
                 'source'   => $raw['p_utm_source'] ?? null,

@@ -42,6 +42,7 @@
              search: '',
              selected: '{{ addslashes($productFilter ?? '') }}',
              products: {{ Js::from($products ?? []) }},
+             dropPos: 'top:0;right:0',
              get filteredProducts() {
                  if (!this.search) return this.products;
                  const q = this.search.toLowerCase();
@@ -57,13 +58,18 @@
              },
              toggle() {
                  this.open = !this.open;
-                 if (this.open) this.$nextTick(() => this.$refs.searchInput && this.$refs.searchInput.focus());
+                 if (this.open) this.$nextTick(() => {
+                     const r = this.$refs.trigger.getBoundingClientRect();
+                     this.dropPos = 'top:' + (r.bottom + 8) + 'px;right:' + (window.innerWidth - r.right) + 'px';
+                     this.$refs.searchInput && this.$refs.searchInput.focus();
+                 });
              }
          }"
          @keydown.escape.window="open = false">
 
         {{-- Trigger --}}
         <button type="button" @click="toggle()"
+                x-ref="trigger"
                 aria-label="Filter by product"
                 :aria-expanded="open"
                 class="relative flex items-center gap-2 text-xs rounded-lg px-3 py-1.5 font-semibold transition-all duration-200 shadow-sm border cursor-pointer focus:outline-none focus:ring-2 focus:ring-offset-1"
@@ -80,7 +86,8 @@
             </svg>
         </button>
 
-        {{-- Dropdown panel --}}
+        {{-- Dropdown panel — teleported to <body> to escape all stacking contexts --}}
+        <template x-teleport="body">
         <div x-show="open" x-cloak @click.outside="open = false"
              x-transition:enter="transition ease-out duration-150"
              x-transition:enter-start="opacity-0 scale-y-95 -translate-y-1"
@@ -88,8 +95,9 @@
              x-transition:leave="transition ease-in duration-100"
              x-transition:leave-start="opacity-100 scale-y-100 translate-y-0"
              x-transition:leave-end="opacity-0 scale-y-95 -translate-y-1"
-             class="absolute right-0 top-full mt-2 w-72 rounded-2xl z-[9999] overflow-hidden origin-top-right"
-             style="background:#0F172A; border:1px solid #1E293B; box-shadow:0 25px 50px -12px rgba(0,0,0,0.6), 0 0 0 1px rgba(245,166,35,0.1);">
+             class="fixed w-72 rounded-2xl z-[9999] overflow-hidden origin-top-right"
+             :style="dropPos + ';background:#0F172A;border:1px solid #1E293B;box-shadow:0 25px 50px -12px rgba(0,0,0,0.6),0 0 0 1px rgba(245,166,35,0.1)'"
+             style="display:none;">
 
             {{-- Header --}}
             <div class="px-4 pt-5 pb-4" style="background:linear-gradient(135deg,#0F172A 0%,#1a2540 100%); border-bottom:1px solid #1E293B;">
@@ -195,6 +203,7 @@
                 </span>
             </div>
         </div>
+        </template>
 
         <input type="hidden" name="{{ $productParam }}" :value="selected">
     </div>

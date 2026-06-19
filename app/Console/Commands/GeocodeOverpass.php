@@ -49,6 +49,10 @@ class GeocodeOverpass extends Command
 
             if ($coords === null) {
                 $notFound++;
+                // Remove stale/wrong entry so attachCoords falls back to city/province center.
+                if ($this->option('force') && !$this->option('dry-run')) {
+                    LocationGeoCache::where('name_key', $key)->delete();
+                }
             } elseif (!$this->option('dry-run')) {
                 LocationGeoCache::updateOrCreate(['name_key' => $key], [
                     'display_name' => $row->name,
@@ -139,9 +143,9 @@ class GeocodeOverpass extends Command
                  ORDER BY province'
             ),
             'barangay' => DB::select(
-                'SELECT DISTINCT ward as name, MAX(province) as province, MAX(district) as city
-                 FROM orders WHERE ward IS NOT NULL AND ward != ""
-                 GROUP BY ward ORDER BY ward'
+                'SELECT DISTINCT ward as name, province, MAX(district) as city
+                 FROM orders WHERE ward IS NOT NULL AND ward != "" AND province IS NOT NULL
+                 GROUP BY ward, province ORDER BY province, ward'
             ),
             default => DB::select(
                 'SELECT DISTINCT district as name, MAX(province) as province, NULL as city
@@ -180,19 +184,39 @@ class GeocodeOverpass extends Command
         if (empty($candidates)) return null;
         if (count($candidates) === 1) return [$candidates[0]['lat'], $candidates[0]['lng']];
 
-        // Ambiguous — pick closest to province center
+        // Ambiguous — for barangays, prefer city center (tighter radius); fall back to province.
         $ambig++;
-        $provKey   = LocationGeoCache::makeKey($row->province ?? '', 'province');
-        $provCache = LocationGeoCache::where('name_key', $provKey)->first();
 
-        if (!$provCache) return [$candidates[0]['lat'], $candidates[0]['lng']];
+        $anchor  = null;
+        $maxDist = 3.0;
+
+        if ($level === 'barangay' && !empty($row->city)) {
+            $cityNorm    = LocationGeoCache::normalize($row->city);
+            $cityNoSufx  = preg_replace('/\s+city$/', '', $cityNorm);
+            $anchor      = LocationGeoCache::whereIn('name_key', [
+                'city:' . $cityNorm,
+                'city:' . $cityNoSufx,
+            ])->first();
+            if ($anchor) $maxDist = 1.0; // ~110 km — tight enough for city-level disambiguation
+        }
+
+        if (!$anchor) {
+            $provKey = LocationGeoCache::makeKey($row->province ?? '', 'province');
+            $anchor  = LocationGeoCache::where('name_key', $provKey)->first();
+        }
+
+        if (!$anchor) return [$candidates[0]['lat'], $candidates[0]['lng']];
 
         $closest = null;
         $minDist = PHP_INT_MAX;
         foreach ($candidates as $c) {
-            $dist = abs($c['lat'] - $provCache->lat) + abs($c['lng'] - $provCache->lng);
+            $dist = abs($c['lat'] - $anchor->lat) + abs($c['lng'] - $anchor->lng);
             if ($dist < $minDist) { $minDist = $dist; $closest = $c; }
         }
+
+        // Reject if the closest match is too far from the anchor (city 1° / province 3°).
+        // This evicts cross-region mismatches so attachCoords falls back to city/province jitter.
+        if ($minDist > $maxDist) return null;
 
         return [$closest['lat'], $closest['lng']];
     }

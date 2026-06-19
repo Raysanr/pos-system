@@ -5,28 +5,58 @@ namespace App\Support;
 class DemographicsExtractor
 {
     private static array $CONDITIONS = [
-        'GLAUCOMA'     => 'Glaucoma',
-        'CATARACT'     => 'Cataract',
-        'SINUSITIS'    => 'Sinusitis',
-        'DIABETES'     => 'Diabetes',
-        'DIABETIC'     => 'Diabetes',
-        'HYPERTENSION' => 'Hypertension',
-        'HIGH BLOOD'   => 'Hypertension',
-        'DRY EYE'      => 'Dry Eyes',
-        'DRYNESS'      => 'Dry Eyes',
-        'LUHA'         => 'Dry Eyes',
-        'MALABO'       => 'Blurry Vision',
-        'ARTHRITIS'    => 'Arthritis',
-        'ASTHMA'       => 'Asthma',
-        'CHOLESTEROL'  => 'High Cholesterol',
-        'COLESTEROL'   => 'High Cholesterol',
-        'URIC ACID'    => 'Uric Acid',
-        'KIDNEY'       => 'Kidney',
-        'THYROID'      => 'Thyroid',
-        'CANCER'       => 'Cancer',
-        'JOINT PAIN'   => 'Joint Pain',
-        'OSTEOPOROSIS' => 'Osteoporosis',
-        'MIGRAINE'     => 'Migraine',
+        // Nasal / Sinus — listed first so sinusitis patients don't get
+        // captured by secondary eye symptoms (e.g. "nagluluha" from sneezing)
+        'ALLERGIC RHINITIS' => 'Allergic Rhinitis',
+        'RHINITIS'          => 'Allergic Rhinitis',
+        'SINUSITIS'         => 'Sinusitis',
+        'NASAL POLYPS'      => 'Nasal Polyps',
+        'POLYPS'            => 'Nasal Polyps',
+
+        // Eye conditions
+        'GLAUCOMA'          => 'Glaucoma',
+        'CATARACT'          => 'Cataract',
+        'KATARATA'          => 'Cataract',        // Filipino word
+        'DRY EYE'           => 'Dry Eyes',
+        'DRYNESS'           => 'Dry Eyes',
+        'LUHA'              => 'Teary Eyes',
+        'MALABO'            => 'Blurry Vision',
+        'HAPDI'             => 'Eye Irritation',   // burning/stinging sensation
+
+        // Neurological / Stroke
+        'STROKE'            => 'Stroke',
+        'PAMAMANHID'        => 'Numbness',
+        'MANHID'            => 'Numbness',
+
+        // Metabolic
+        'DIABETES'          => 'Diabetes',
+        'DIABETIC'          => 'Diabetes',
+        'URIC ACID'         => 'Uric Acid',
+        'GOUT'              => 'Gout',
+        'CHOLESTEROL'       => 'High Cholesterol',
+        'COLESTEROL'        => 'High Cholesterol',
+
+        // Cardiovascular
+        'HYPERTENSION'      => 'Hypertension',
+        'HIGHBLOOD'         => 'Hypertension',    // no-space variant
+        'HIGH BLOOD'        => 'Hypertension',
+        'PRESYON'           => 'Hypertension',    // Filipino
+
+        // Musculoskeletal
+        'ARTHRITIS'         => 'Arthritis',
+        'JOINT PAIN'        => 'Joint Pain',
+        'OSTEOPOROSIS'      => 'Osteoporosis',
+
+        // Respiratory
+        'ASTHMA'            => 'Asthma',
+        'ACID REFLUX'       => 'Acid Reflux',
+
+        // Other
+        'DIALYSIS'          => 'Kidney Disease',
+        'KIDNEY'            => 'Kidney Disease',
+        'THYROID'           => 'Thyroid',
+        'CANCER'            => 'Cancer',
+        'MIGRAINE'          => 'Migraine',
     ];
 
     public static function age(?string $note): ?int
@@ -39,15 +69,26 @@ class DemographicsExtractor
         return null;
     }
 
-    public static function condition(?string $note): ?string
+    /**
+     * Returns every condition label that matches the note (deduplicated, ordered by keyword priority).
+     * Nasal conditions still come first to prevent sinusitis patients from matching LUHA (Teary Eyes).
+     */
+    public static function conditions(?string $note): array
     {
-        if (!$note) return null;
-        $upper = strtoupper($note);
+        if (!$note) return [];
+        $upper  = strtoupper($note);
+        $labels = [];
         foreach (self::$CONDITIONS as $keyword => $label) {
-            if (str_contains($upper, $keyword)) {
-                return $label;
+            if (str_contains($upper, $keyword) && !in_array($label, $labels, true)) {
+                $labels[] = $label;
             }
         }
-        return null;
+        return $labels;
+    }
+
+    /** @deprecated Use conditions() — returns first match only for backward compat. */
+    public static function condition(?string $note): ?string
+    {
+        return self::conditions($note)[0] ?? null;
     }
 }

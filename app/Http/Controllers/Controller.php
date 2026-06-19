@@ -74,4 +74,14 @@ abstract class Controller
         if ($from === now()->subDays(90)->format('Y-m-d') && $to === $today) return '90d';
         return 'custom';
     }
+
+    protected function shopCacheBust(int $shopId): string
+    {
+        return (string) Cache::get("shop_bust_{$shopId}", 0);
+    }
+
+    protected function bustShopCache(int $shopId): void
+    {
+        Cache::put("shop_bust_{$shopId}", time(), now()->addDays(30));
+    }
 }

@@ -17,13 +17,12 @@ class CustomerAnalyticsController extends Controller
         $products      = $this->getProducts($shop->id);
         $datePreset    = $this->detectDatePreset($dateFrom, $dateTo);
 
-        $cacheKey = "customers_{$shop->id}_{$dateFrom}_{$dateTo}_{$productFilter}";
+        $cacheKey = "customers_{$shop->id}_{$this->shopCacheBust($shop->id)}_{$dateFrom}_{$dateTo}_{$productFilter}";
         $cached = Cache::remember($cacheKey, 300, function () use ($shop, $dateFrom, $dateTo, $productFilter) {
             return [
                 'totalCustomers' => $this->baseCustomer($shop->id, $dateFrom, $dateTo, $productFilter)->count(),
                 'genderStats'    => $this->getGenderStats($shop->id, $dateFrom, $dateTo, $productFilter),
                 'ageStats'       => $this->getOrderFrequencyStats($shop->id, $dateFrom, $dateTo, $productFilter),
-                'levelStats'     => $this->getCustomerLevelStats($shop->id, $dateFrom, $dateTo, $productFilter),
                 'birthdayMonth'  => $this->getAcquisitionByMonthStats($shop->id, $dateFrom, $dateTo, $productFilter),
                 'topProvinces'   => $this->getTopProvinces($shop->id, $dateFrom, $dateTo, $productFilter),
                 'newVsReturning' => $this->getNewVsReturning($shop->id, $dateFrom, $dateTo, $productFilter),
@@ -34,14 +33,13 @@ class CustomerAnalyticsController extends Controller
         $totalCustomers = $cached['totalCustomers'];
         $genderStats    = $cached['genderStats'];
         $ageStats       = $cached['ageStats'];
-        $levelStats     = $cached['levelStats'];
         $birthdayMonth  = $cached['birthdayMonth'];
         $topProvinces   = $cached['topProvinces'];
         $newVsReturning = $cached['newVsReturning'];
         $topCustomers   = $cached['topCustomers'];
 
         return view('analytics.customers', compact(
-            'shop', 'totalCustomers', 'genderStats', 'ageStats', 'levelStats',
+            'shop', 'totalCustomers', 'genderStats', 'ageStats',
             'birthdayMonth', 'topProvinces', 'newVsReturning', 'topCustomers',
             'products', 'productFilter', 'dateFrom', 'dateTo', 'datePreset'
         ));
@@ -121,17 +119,6 @@ class CustomerAnalyticsController extends Controller
         return ['labels' => array_keys($groups), 'data' => array_values($groups)];
     }
 
-    private function getCustomerLevelStats(int $shopId, ?string $dateFrom, ?string $dateTo, ?string $productFilter): array
-    {
-        return $this->baseCustomer($shopId, $dateFrom, $dateTo, $productFilter)
-            ->whereNotNull('customer_level')
-            ->select('customer_level', DB::raw('COUNT(*) as count'), DB::raw('AVG(total_spent) as avg_spent'))
-            ->groupBy('customer_level')
-            ->orderByDesc('count')
-            ->get()
-            ->toArray();
-    }
-
     private function getAcquisitionByMonthStats(int $shopId, ?string $dateFrom, ?string $dateTo, ?string $productFilter): array
     {
         $q = DB::table('orders')
@@ -158,13 +145,23 @@ class CustomerAnalyticsController extends Controller
 
     private function getTopProvinces(int $shopId, ?string $dateFrom, ?string $dateTo, ?string $productFilter): array
     {
-        return $this->baseCustomer($shopId, $dateFrom, $dateTo, $productFilter)
+        // Use orders.province (structured from Pancake's shipping_address.province_name),
+        // counting distinct customers per province so repeat orders don't skew the list.
+        $q = DB::table('orders')
+            ->where('shop_id', $shopId)
             ->whereNotNull('province')
-            ->select('province', DB::raw('COUNT(*) as count'), DB::raw('SUM(total_spent) as total_spent'))
+            ->whereNotNull('customer_pancake_id');
+        $this->applyOrderFilters($q, $dateFrom, $dateTo, $productFilter);
+        return $q->select(
+                'province',
+                DB::raw('COUNT(DISTINCT customer_pancake_id) as count'),
+                DB::raw("SUM(CASE WHEN status = 'delivered' THEN total_price ELSE 0 END) as total_spent")
+            )
             ->groupBy('province')
             ->orderByDesc('count')
             ->take(15)
             ->get()
+            ->map(fn($r) => (array) $r)
             ->toArray();
     }
 
