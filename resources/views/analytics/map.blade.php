@@ -38,7 +38,7 @@
 <div id="map-breadcrumb" class="hidden items-center gap-1.5 text-xs mb-3 bg-white rounded-xl border border-blue-100 px-4 py-2.5 shadow-sm"></div>
 
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-    <div class="lg:col-span-2 bg-white rounded-xl border border-blue-100 shadow-sm overflow-hidden">
+    <div class="lg:col-span-2 bg-white rounded-xl border border-blue-100 shadow-sm overflow-hidden isolate">
         <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
             <div>
                 <h3 class="text-sm font-semibold text-slate-800">Philippine Order Map</h3>
@@ -154,9 +154,12 @@ function renderMarkers() {
             weight:1.5, opacity:1, fillOpacity:0.82,
         });
 
+        const drillFn = currentLevel === 'province'
+            ? `drillDown('${d.name.replace(/'/g,"\\'")}',null)`
+            : `drillDown(currentProvinceFilter,'${d.name.replace(/'/g,"\\'")}')`;
         const drillBtn = currentLevel !== 'barangay'
             ? `<div style="margin-top:8px;text-align:center">
-                 <button onclick="drillDown('${d.name.replace(/'/g,"\\'")}',null)"
+                 <button onclick="${drillFn}"
                    style="font-size:10px;padding:3px 10px;background:#1e40af;color:#fff;border:none;border-radius:4px;cursor:pointer">
                    ${currentLevel==='province' ? 'View Cities ›' : 'View Barangays ›'}
                  </button></div>` : '';

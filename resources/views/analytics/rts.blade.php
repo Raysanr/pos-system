@@ -16,10 +16,6 @@
 @section('content')
 <!-- KPI Cards -->
 <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-    <div class="bg-white rounded-xl border border-blue-100 p-4 shadow-sm">
-        <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Total Orders</p>
-        <p class="text-xl font-bold text-slate-900 font-mono">{{ number_format($rtsKpis['total_orders']) }}</p>
-    </div>
     <div class="bg-white rounded-xl border border-red-100 p-4 shadow-sm">
         <p class="text-xs font-semibold text-red-500 uppercase tracking-wider mb-2">RTS Count</p>
         <p class="text-xl font-bold text-red-700 font-mono">{{ number_format($rtsKpis['rts_count']) }}</p>
@@ -35,6 +31,11 @@
     <div class="bg-white rounded-xl border border-slate-100 p-4 shadow-sm">
         <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Revenue Lost</p>
         <p class="text-xl font-bold text-slate-900 font-mono">₱{{ number_format($rtsKpis['revenue_lost']) }}</p>
+    </div>
+    <div class="bg-white rounded-xl border border-red-100 p-4 shadow-sm">
+        <p class="text-xs font-semibold uppercase tracking-wider mb-2" style="color:#EF4444;">Bottles Lost</p>
+        <p class="text-xl font-bold font-mono" style="color:#EF4444;">{{ number_format($rtsKpis['bottles_lost']) }}</p>
+        <p class="mt-1 text-xs text-slate-400">RTS bottles</p>
     </div>
 </div>
 

@@ -104,16 +104,17 @@ class DashboardController extends Controller
         $rts          = (int)   $row->rts_count;
 
         return [
-            'total_revenue'   => $totalRevenue,
-            'revenue_change'  => $revenueChange,
-            'total_orders'    => $totalOrders,
-            'orders_change'   => $ordersChange,
-            'delivered'       => $delivered,
-            'rts_count'       => $rts,
-            'rts_rate'        => $totalOrders > 0 ? round(($rts / $totalOrders) * 100, 1) : 0,
-            'total_customers' => $customers,
-            'new_customers'   => $newCustomers,
-            'avg_order_value' => $delivered > 0 ? round($totalRevenue / $delivered) : 0,
+            'total_revenue'       => $totalRevenue,
+            'revenue_change'      => $revenueChange,
+            'total_orders'        => $totalOrders,
+            'orders_change'       => $ordersChange,
+            'delivered'           => $delivered,
+            'rts_count'           => $rts,
+            'rts_rate'            => $totalOrders > 0 ? round(($rts / $totalOrders) * 100, 1) : 0,
+            'total_customers'     => $customers,
+            'new_customers'       => $newCustomers,
+            'avg_order_value'     => $delivered > 0 ? round($totalRevenue / $delivered) : 0,
+            'total_bottles_sold'  => $this->sumBottles($shopId, $from, $to, $pf, ["o.status = 'delivered'"]),
         ];
     }
 

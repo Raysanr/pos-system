@@ -66,11 +66,12 @@ class ProductAudienceController extends Controller
 
         $total = (int) $row->total_orders;
         return [
-            'total_orders' => $total,
-            'avg_age'      => $row->avg_age ? (int) round($row->avg_age) : null,
-            'deliver_rate' => $total > 0 ? round($row->delivered / $total * 100, 1) : 0,
-            'rts_rate'     => $total > 0 ? round($row->rts / $total * 100, 1) : 0,
-            'revenue'      => number_format((float) $row->revenue),
+            'total_orders'  => $total,
+            'avg_age'       => $row->avg_age ? (int) round($row->avg_age) : null,
+            'deliver_rate'  => $total > 0 ? round($row->delivered / $total * 100, 1) : 0,
+            'rts_rate'      => $total > 0 ? round($row->rts / $total * 100, 1) : 0,
+            'revenue'       => number_format((float) $row->revenue),
+            'total_bottles' => $this->sumBottles($shopId, $from, $to, $product, ["o.status = 'delivered'"]),
         ];
     }
 

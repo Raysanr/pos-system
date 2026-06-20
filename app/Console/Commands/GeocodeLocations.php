@@ -9,8 +9,8 @@ use Illuminate\Support\Facades\DB;
 
 class GeocodeLocations extends Command
 {
-    protected $signature   = 'map:geocode {--level=all : province|city|all}';
-    protected $description = 'Geocode all unique provinces and cities from orders into the map geocache';
+    protected $signature   = 'map:geocode {--level=all : province|city|all} {--force : Overwrite already-cached entries}';
+    protected $description = 'Geocode all unique provinces and cities from orders into the map geocache (Nominatim, province-context-aware)';
 
     public function handle(GeocodingService $geo): int
     {
@@ -74,6 +74,12 @@ class GeocodeLocations extends Command
         $cached   = 0;
         $geocoded = 0;
         $failed   = 0;
+        $rejected = 0;
+
+        // Pre-load province centers for cross-province sanity check
+        $provinceCenters = LocationGeoCache::where('level', 'province')
+            ->get(['name_key', 'lat', 'lng'])
+            ->keyBy('name_key');
 
         $bar = $this->output->createProgressBar($total);
         $bar->start();
@@ -81,7 +87,7 @@ class GeocodeLocations extends Command
         foreach ($rows as $row) {
             $loc = $mapper($row);
 
-            if (LocationGeoCache::where('name_key', $loc['key'])->exists()) {
+            if (!$this->option('force') && LocationGeoCache::where('name_key', $loc['key'])->exists()) {
                 $cached++;
                 $bar->advance();
                 continue;
@@ -90,6 +96,28 @@ class GeocodeLocations extends Command
             $coords = $geo->geocodeQuery($loc['query']);
 
             if ($coords) {
+                // For city-level, reject results that are more than 2° from the
+                // province center — this catches wrong-province matches for common
+                // names like "San Fernando" or "San Jose".
+                if ($level === 'city' && !empty($loc['province'])) {
+                    $provKey    = LocationGeoCache::makeKey($loc['province'], 'province');
+                    $provAnchor = $provinceCenters->get($provKey);
+                    if ($provAnchor) {
+                        $latDiff = abs($coords[0] - $provAnchor->lat);
+                        $lngDiff = abs($coords[1] - $provAnchor->lng);
+                        // Per-dimension check: each coordinate must be within 1° of the
+                        // province center. This is tighter than a Manhattan-distance check
+                        // and correctly rejects wrong-province Nominatim hits for common
+                        // names (e.g. "san jose, camarines sur" returning Batangas coords).
+                        if ($latDiff > 1.0 || $lngDiff > 1.0) {
+                            $rejected++;
+                            $bar->advance();
+                            usleep(1_100_000);
+                            continue; // Skip — falls back to province-center jitter on the map
+                        }
+                    }
+                }
+
                 LocationGeoCache::updateOrCreate(['name_key' => $loc['key']], [
                     'display_name' => $loc['name'],
                     'level'        => $level,
@@ -99,8 +127,6 @@ class GeocodeLocations extends Command
                 $geocoded++;
             } else {
                 $failed++;
-                $this->newLine();
-                $this->warn("  ✗ Not found: {$loc['query']}");
             }
 
             $bar->advance();
@@ -109,6 +135,6 @@ class GeocodeLocations extends Command
 
         $bar->finish();
         $this->newLine();
-        $this->info("  {$total} total · {$cached} already cached · {$geocoded} geocoded · {$failed} not found");
+        $this->info("  {$total} total · {$cached} cached · {$geocoded} geocoded · {$rejected} rejected (wrong province) · {$failed} not found");
     }
 }

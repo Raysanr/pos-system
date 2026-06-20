@@ -84,4 +84,39 @@ abstract class Controller
     {
         Cache::put("shop_bust_{$shopId}", time(), now()->addDays(30));
     }
+
+    // Sum total bottles across orders by parsing the leading integer from the variation name
+    // (e.g. "4 Clear Sight 3.0" → 4 bottles) multiplied by the item's own quantity field.
+    // $extraClauses / $extraParams let callers add conditions like "o.status = 'delivered'".
+    protected function sumBottles(int $shopId, ?string $from, ?string $to, ?string $pf = null, array $extraClauses = [], array $extraParams = []): int
+    {
+        $whereParts = ['o.shop_id = ?'];
+        $params     = [$shopId];
+
+        if ($from && $to) {
+            $whereParts[] = 'o.ordered_at BETWEEN ? AND ?';
+            $params[]     = $from . ' 00:00:00';
+            $params[]     = $to   . ' 23:59:59';
+        }
+        if ($pf) {
+            $whereParts[] = "EXISTS (SELECT 1 FROM json_each(o.items) AS pf_check WHERE json_extract(pf_check.value, '$.variation_info.name') = ? COLLATE NOCASE)";
+            $params[]     = $pf;
+        }
+        foreach ($extraClauses as $clause) {
+            $whereParts[] = $clause;
+        }
+        $params = array_merge($params, $extraParams);
+        $where  = implode(' AND ', $whereParts);
+
+        $result = DB::selectOne("
+            SELECT SUM(
+                MAX(CAST(json_extract(item.value, '$.variation_info.name') AS INTEGER), 1)
+                * MAX(CAST(COALESCE(json_extract(item.value, '$.quantity'), 1) AS INTEGER), 1)
+            ) as total_bottles
+            FROM orders o, json_each(o.items) AS item
+            WHERE {$where}
+        ", $params);
+
+        return (int) ($result?->total_bottles ?? 0);
+    }
 }

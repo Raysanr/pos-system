@@ -103,11 +103,6 @@ class GeocodeOverpass extends Command
             $this->info('Pass 1 skipped (--places-only).');
         }
 
-        // Provinces don't benefit from place nodes — boundary centroids are sufficient
-        if ($level === 'province') {
-            return $boundaryIndex;
-        }
-
         $placeTags = $level === 'barangay'
             ? 'village|hamlet|suburb|neighbourhood'
             : 'city|municipality|town';
@@ -124,7 +119,32 @@ class GeocodeOverpass extends Command
         if ($placeIndex === null) return null;
         $this->info('Place nodes: ' . array_sum(array_map('count', $placeIndex)));
 
-        // Boundary relations take priority (more accurate centroid)
+        if ($level === 'province') {
+            // For provinces, place nodes (manually placed on land by OSM editors) are more
+            // reliable than boundary centroids (polygon centers that regularly fall in the sea
+            // for island provinces like Palawan, Romblon, Dinagat, etc.).
+            // Strategy: place node wins; boundary centroid only fills the gap when no place
+            // node matches AND the centroid itself passes the Philippines bounding-box check.
+            $replaced = 0;
+            foreach ($boundaryIndex as $name => $entries) {
+                if (isset($placeIndex[$name])) {
+                    // Place node exists — it takes priority over the boundary centroid.
+                    $replaced++;
+                    continue;
+                }
+                $c = $entries[0] ?? null;
+                if ($c && $this->isWithinPhilippines($c['lat'], $c['lng'])) {
+                    $placeIndex[$name] = $entries; // boundary centroid looks valid, use it
+                }
+                // If boundary is also out of range and no place node: skip entirely so
+                // attachCoords falls back to parent (better than a sea coordinate).
+            }
+            if ($replaced) $this->line("  {$replaced} province(s) used place-node coords over boundary centroids.");
+            $this->info('Province index (place-node priority): ' . count($placeIndex) . ' entries');
+            return $placeIndex;
+        }
+
+        // City / barangay: boundary relations take priority (more accurate centroid)
         $merged = $placeIndex;
         foreach ($boundaryIndex as $name => $entries) {
             $merged[$name] = $entries;
@@ -182,7 +202,10 @@ class GeocodeOverpass extends Command
         }
 
         if (empty($candidates)) return null;
-        if (count($candidates) === 1) return [$candidates[0]['lat'], $candidates[0]['lng']];
+        if (count($candidates) === 1) {
+            $c = $candidates[0];
+            return $this->isWithinPhilippines($c['lat'], $c['lng']) ? [$c['lat'], $c['lng']] : null;
+        }
 
         // Ambiguous — for barangays, prefer city center (tighter radius); fall back to province.
         $ambig++;
@@ -218,7 +241,21 @@ class GeocodeOverpass extends Command
         // This evicts cross-region mismatches so attachCoords falls back to city/province jitter.
         if ($minDist > $maxDist) return null;
 
-        return [$closest['lat'], $closest['lng']];
+        return $this->isWithinPhilippines($closest['lat'], $closest['lng'])
+            ? [$closest['lat'], $closest['lng']]
+            : null;
+    }
+
+    /**
+     * Rough bounding box guard for the Philippine archipelago.
+     * Rejects results that Overpass returned but clearly fall outside PH territory
+     * (e.g. admin boundary centroids that land in the open sea far from any island).
+     */
+    private function isWithinPhilippines(float $lat, float $lng): bool
+    {
+        // Tight west bound: Palawan's coast is ~117.2°E at Balabac; anything further west
+        // is open South China Sea and should not be stored as a PH location.
+        return $lat >= 4.5 && $lat <= 21.5 && $lng >= 117.0 && $lng <= 128.5;
     }
 
     private function queryOverpass(string $query, callable $hasCoords, callable $extractCoords): ?array

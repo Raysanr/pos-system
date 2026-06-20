@@ -58,12 +58,13 @@ class RtsAnalyticsController extends Controller
         $rts   = (int) $row->rts_count;
 
         return [
-            'total_orders' => $total,
-            'rts_count'    => $rts,
-            'rts_rate'     => $total > 0 ? round(($rts / $total) * 100, 1) : 0,
-            'returned'     => (int) $row->returned,
-            'cancelled'    => (int) $row->cancelled,
-            'revenue_lost' => (float) $row->revenue_lost,
+            'total_orders'  => $total,
+            'rts_count'     => $rts,
+            'rts_rate'      => $total > 0 ? round(($rts / $total) * 100, 1) : 0,
+            'returned'      => (int) $row->returned,
+            'cancelled'     => (int) $row->cancelled,
+            'revenue_lost'  => (float) $row->revenue_lost,
+            'bottles_lost'  => $this->sumBottles($shopId, $from, $to, $pf, ['o.is_rts = 1']),
         ];
     }
 

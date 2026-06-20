@@ -37,6 +37,7 @@
              search: '',
              selected: '{{ addslashes($selectedProduct ?? '') }}',
              products: {{ Js::from($products) }},
+             dropPos: 'top:0;right:0',
              get filteredProducts() {
                  if (!this.search) return this.products;
                  const q = this.search.toLowerCase();
@@ -50,12 +51,17 @@
              },
              toggle() {
                  this.open = !this.open;
-                 if (this.open) this.$nextTick(() => this.$refs.searchInput && this.$refs.searchInput.focus());
+                 if (this.open) this.$nextTick(() => {
+                     const r = this.$refs.trigger.getBoundingClientRect();
+                     this.dropPos = 'top:' + (r.bottom + 8) + 'px;right:' + (window.innerWidth - r.right) + 'px';
+                     this.$refs.searchInput && this.$refs.searchInput.focus();
+                 });
              }
          }"
          @keydown.escape.window="open = false">
 
         <button type="button" @click="toggle()"
+                x-ref="trigger"
                 aria-label="Select product"
                 :aria-expanded="open"
                 class="relative flex items-center gap-2 text-xs rounded-lg px-3 py-1.5 font-semibold transition-all duration-200 shadow-sm border cursor-pointer focus:outline-none focus:ring-2 focus:ring-offset-1"
@@ -71,6 +77,8 @@
             </svg>
         </button>
 
+        {{-- Dropdown panel — teleported to <body> to escape header stacking context --}}
+        <template x-teleport="body">
         <div x-show="open" x-cloak @click.outside="open = false"
              x-transition:enter="transition ease-out duration-150"
              x-transition:enter-start="opacity-0 scale-y-95 -translate-y-1"
@@ -78,8 +86,9 @@
              x-transition:leave="transition ease-in duration-100"
              x-transition:leave-start="opacity-100 scale-y-100 translate-y-0"
              x-transition:leave-end="opacity-0 scale-y-95 -translate-y-1"
-             class="absolute right-0 top-full mt-2 w-72 rounded-2xl z-[9999] overflow-hidden origin-top-right"
-             style="background:#0F172A; border:1px solid #1E293B; box-shadow:0 25px 50px -12px rgba(0,0,0,0.6), 0 0 0 1px rgba(245,166,35,0.1);">
+             class="fixed w-72 rounded-2xl z-[9999] overflow-hidden origin-top-right"
+             :style="dropPos + ';z-index:9999;background:#0F172A;border:1px solid #1E293B;box-shadow:0 25px 50px -12px rgba(0,0,0,0.6),0 0 0 1px rgba(245,166,35,0.1)'"
+             style="display:none;z-index:9999;">
 
             <div class="px-4 pt-5 pb-4" style="background:linear-gradient(135deg,#0F172A 0%,#1a2540 100%); border-bottom:1px solid #1E293B;">
                 <div class="flex items-center gap-2 mb-2.5">
@@ -142,6 +151,7 @@
                 <span class="text-xs" style="color:#475569;">Click to apply instantly</span>
             </div>
         </div>
+        </template>
 
         <input type="hidden" name="product" :value="selected">
     </div>
@@ -175,17 +185,19 @@
 @elseif($data)
 
 {{-- KPI Cards --}}
-<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+<div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
     @php
     $kpiDefs = [
-        ['label'=>'Total Orders',  'value'=>number_format($data['kpis']['total_orders']),                           'sub'=>'for this product',   'color'=>'#1E40AF', 'bg'=>'rgba(30,64,175,0.08)',   'border'=>'#DBEAFE',
+        ['label'=>'Total Orders',   'value'=>number_format($data['kpis']['total_orders']),                           'sub'=>'for this product',    'color'=>'#1E40AF', 'bg'=>'rgba(30,64,175,0.08)',   'border'=>'#DBEAFE',
          'icon'=>'M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z'],
-        ['label'=>'Average Age',   'value'=>$data['kpis']['avg_age'] ? $data['kpis']['avg_age'].' yrs' : '—',      'sub'=>'from order notes',   'color'=>'#8B5CF6', 'bg'=>'rgba(139,92,246,0.08)',  'border'=>'#EDE9FE',
+        ['label'=>'Average Age',    'value'=>$data['kpis']['avg_age'] ? $data['kpis']['avg_age'].' yrs' : '—',      'sub'=>'from order notes',    'color'=>'#8B5CF6', 'bg'=>'rgba(139,92,246,0.08)',  'border'=>'#EDE9FE',
          'icon'=>'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z'],
-        ['label'=>'Delivery Rate', 'value'=>$data['kpis']['deliver_rate'].'%',                                      'sub'=>'orders delivered',   'color'=>'#10B981', 'bg'=>'rgba(16,185,129,0.08)',  'border'=>'#D1FAE5',
+        ['label'=>'Delivery Rate',  'value'=>$data['kpis']['deliver_rate'].'%',                                      'sub'=>'orders delivered',    'color'=>'#10B981', 'bg'=>'rgba(16,185,129,0.08)',  'border'=>'#D1FAE5',
          'icon'=>'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z'],
-        ['label'=>'RTS Rate',      'value'=>$data['kpis']['rts_rate'].'%',                                          'sub'=>'returned to sender', 'color'=>'#EF4444', 'bg'=>'rgba(239,68,68,0.08)',   'border'=>'#FEE2E2',
+        ['label'=>'RTS Rate',       'value'=>$data['kpis']['rts_rate'].'%',                                          'sub'=>'returned to sender',  'color'=>'#EF4444', 'bg'=>'rgba(239,68,68,0.08)',   'border'=>'#FEE2E2',
          'icon'=>'M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6'],
+        ['label'=>'Bottles Sold',   'value'=>number_format($data['kpis']['total_bottles']),                          'sub'=>'delivered bottles',   'color'=>'#10B981', 'bg'=>'rgba(16,185,129,0.08)',  'border'=>'#D1FAE5',
+         'icon'=>'M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z'],
     ];
     @endphp
     @foreach($kpiDefs as $k)
@@ -345,16 +357,6 @@
             </div>
             <div class="flex items-center justify-center">
                 <canvas id="nvrChart" class="chart-canvas" style="max-height:180px;max-width:180px;"></canvas>
-            </div>
-        </div>
-        <div class="grid grid-cols-2 gap-3 mt-4">
-            <div class="rounded-xl p-4 text-center" style="background:rgba(245,166,35,0.07);border:1px solid rgba(245,166,35,0.2);">
-                <p class="text-2xl font-bold font-mono" style="color:#F5A623;">{{ number_format($nvr['new']) }}</p>
-                <p class="text-xs mt-1" style="color:#94A3B8;">First-time buyers</p>
-            </div>
-            <div class="rounded-xl p-4 text-center" style="background:rgba(30,64,175,0.06);border:1px solid rgba(30,64,175,0.15);">
-                <p class="text-2xl font-bold font-mono" style="color:#1E40AF;">{{ number_format($nvr['returning']) }}</p>
-                <p class="text-xs mt-1" style="color:#94A3B8;">Repeat buyers</p>
             </div>
         </div>
         @else

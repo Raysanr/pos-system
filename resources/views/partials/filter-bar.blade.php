@@ -96,8 +96,8 @@
              x-transition:leave-start="opacity-100 scale-y-100 translate-y-0"
              x-transition:leave-end="opacity-0 scale-y-95 -translate-y-1"
              class="fixed w-72 rounded-2xl z-[9999] overflow-hidden origin-top-right"
-             :style="dropPos + ';background:#0F172A;border:1px solid #1E293B;box-shadow:0 25px 50px -12px rgba(0,0,0,0.6),0 0 0 1px rgba(245,166,35,0.1)'"
-             style="display:none;">
+             :style="dropPos + ';z-index:9999;background:#0F172A;border:1px solid #1E293B;box-shadow:0 25px 50px -12px rgba(0,0,0,0.6),0 0 0 1px rgba(245,166,35,0.1)'"
+             style="display:none;z-index:9999;">
 
             {{-- Header --}}
             <div class="px-4 pt-5 pb-4" style="background:linear-gradient(135deg,#0F172A 0%,#1a2540 100%); border-bottom:1px solid #1E293B;">
