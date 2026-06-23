@@ -6,6 +6,7 @@ use App\Services\GeocodingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class MapAnalyticsController extends Controller
 {
@@ -24,12 +25,21 @@ class MapAnalyticsController extends Controller
         $datePreset     = $this->detectDatePreset($dateFrom, $dateTo);
 
         $cacheKey = "map_{$shop->id}_{$dateFrom}_{$dateTo}_{$status}_{$level}_{$provinceFilter}_{$cityFilter}_{$productFilter}";
-        $mapData  = Cache::remember($cacheKey, 300, fn() =>
-            $this->getLocationData($shop->id, $dateFrom, $dateTo, $status, $level, $provinceFilter, $cityFilter, $productFilter)
-        );
-
-        // Attach geocoordinates (not cached — geocache is its own persistence layer)
-        $mapData = app(GeocodingService::class)->attachCoords($mapData, $level, $provinceFilter);
+        try {
+            $mapData = Cache::remember($cacheKey, 1800, function () use ($shop, $dateFrom, $dateTo, $status, $level, $provinceFilter, $cityFilter, $productFilter) {
+                $data   = $this->getLocationData($shop->id, $dateFrom, $dateTo, $status, $level, $provinceFilter, $cityFilter, $productFilter);
+                $result = app(GeocodingService::class)->attachCoords($data, $level, $provinceFilter);
+                $hasPoints = count($data) > 0;
+                $hasCoords = !empty(array_filter($result, fn($r) => !empty($r['lat']) || !empty($r['lng'])));
+                if ($hasPoints && !$hasCoords) {
+                    throw new \RuntimeException('Geocoding returned no coordinates — skipping cache.');
+                }
+                return $result;
+            });
+        } catch (\RuntimeException $e) {
+            Log::warning("MapAnalyticsController: {$e->getMessage()}");
+            $mapData = $this->getLocationData($shop->id, $dateFrom, $dateTo, $status, $level, $provinceFilter, $cityFilter, $productFilter);
+        }
 
         if ($request->expectsJson()) {
             return response()->json($mapData);

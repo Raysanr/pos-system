@@ -75,10 +75,68 @@
 
         /* Table row hover */
         tbody tr { transition: background 0.12s ease; }
+
+        /* ── Filter loading states ────────────────────────────────────── */
+        /* Top progress bar */
+        #filter-progress-bar {
+            position: fixed;
+            top: 56px; /* below the h-14 header */
+            left: 240px; /* right of the w-60 sidebar */
+            right: 0;
+            height: 3px;
+            z-index: 9999;
+            display: none;
+            background: linear-gradient(90deg, #1E40AF 0%, #3B82F6 35%, #F5A623 65%, #1E40AF 100%);
+            background-size: 300% 100%;
+            animation: filterProgress 1.4s linear infinite;
+        }
+        @keyframes filterProgress {
+            0%   { background-position: 100% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        /* Chart area loading overlay */
+        .chart-filter-overlay {
+            position: absolute; inset: 0; z-index: 20;
+            background: rgba(255,255,255,0.82);
+            backdrop-filter: blur(2px);
+            -webkit-backdrop-filter: blur(2px);
+            display: flex; align-items: center; justify-content: center;
+            border-radius: 8px;
+            animation: cfOverlayIn 0.18s ease;
+        }
+        @keyframes cfOverlayIn { from { opacity: 0; } to { opacity: 1; } }
+        .chart-filter-spinner {
+            width: 30px; height: 30px;
+            border: 3px solid #E2E8F0;
+            border-top-color: #1E40AF;
+            border-radius: 50%;
+            animation: cfSpin 0.75s linear infinite;
+        }
+        @keyframes cfSpin { to { transform: rotate(360deg); } }
+
+        /* KPI card pulse while loading */
+        @keyframes kpiLoadPulse {
+            0%, 100% { opacity: 1; }
+            50%       { opacity: 0.42; }
+        }
+        .kpi-card.is-loading {
+            animation: kpiLoadPulse 1.1s ease-in-out infinite !important;
+            pointer-events: none;
+        }
+        .kpi-card.is-loading:hover { transform: none !important; box-shadow: none !important; }
+
+        /* Table body dim while loading */
+        tbody.tbody-loading {
+            opacity: 0.3;
+            pointer-events: none;
+            transition: opacity 0.2s ease;
+        }
     </style>
     @stack('head')
 </head>
 <body class="h-full">
+<div id="filter-progress-bar"></div>
 <div class="flex h-screen overflow-hidden">
 
     <!-- Sidebar -->
@@ -245,8 +303,208 @@ function handlePreset(sel) {
         case '30d': fromInput.value = ago(30); toInput.value = today; break;
         case '90d': fromInput.value = ago(90); toInput.value = today; break;
     }
-    form.submit();
+    form.requestSubmit();
 }
+
+// ── Filter state persistence (localStorage per page) ─────────────────────────
+// On every filter submit: save params keyed by route name.
+// On page load with no URL params: restore the last-used filter for this page.
+(function () {
+    var storageKey = 'filterState_{{ \Route::currentRouteName() }}';
+
+    // Called by the AJAX interceptor after every filter submission
+    window.__saveFilterState = function (params) {
+        try {
+            var obj = {};
+            params.forEach(function (v, k) { obj[k] = v; });
+            localStorage.setItem(storageKey, JSON.stringify(obj));
+        } catch (e) {}
+    };
+
+    if (window.location.search.length > 1) {
+        // Page loaded with params already in URL (full reload or direct link) — save them
+        window.__saveFilterState(new URLSearchParams(window.location.search));
+    } else {
+        // No params — restore last-used filter unless the user navigated here from the
+        // same page (e.g. clicked the nav link to reset filters).
+        var referrerPath = '';
+        try { referrerPath = new URL(document.referrer).pathname; } catch (e) {}
+        if (referrerPath !== window.location.pathname) {
+            try {
+                var saved = JSON.parse(localStorage.getItem(storageKey) || 'null');
+                if (saved !== null) {
+                    var qs = new URLSearchParams(saved).toString();
+                    if (qs) window.location.replace(window.location.pathname + '?' + qs);
+                }
+            } catch (e) {}
+        }
+    }
+})();
+
+// ── Filter loading helpers ────────────────────────────────────────────────────
+function showFilterLoading() {
+    var bar = document.getElementById('filter-progress-bar');
+    if (bar) bar.style.display = 'block';
+
+    // Overlay spinners on every visible chart
+    document.querySelectorAll('.chart-wrap').forEach(function (wrap) {
+        if (wrap.querySelector('.chart-filter-overlay')) return;
+        if (!wrap.querySelector('.chart-canvas.loaded')) return;
+        var o = document.createElement('div');
+        o.className = 'chart-filter-overlay';
+        o.innerHTML = '<div class="chart-filter-spinner"></div>';
+        wrap.appendChild(o);
+    });
+
+    // Pulse KPI cards
+    document.querySelectorAll('.kpi-card').forEach(function (el) {
+        el.classList.add('is-loading');
+    });
+
+    // Dim table bodies that have IDs (data tables, not layout tables)
+    document.querySelectorAll('tbody[id]').forEach(function (el) {
+        el.classList.add('tbody-loading');
+    });
+}
+
+function hideFilterLoading() {
+    var bar = document.getElementById('filter-progress-bar');
+    if (bar) bar.style.display = 'none';
+
+    document.querySelectorAll('.chart-filter-overlay').forEach(function (el) {
+        el.remove();
+    });
+    document.querySelectorAll('.kpi-card.is-loading').forEach(function (el) {
+        el.classList.remove('is-loading');
+    });
+    document.querySelectorAll('tbody.tbody-loading').forEach(function (el) {
+        el.classList.remove('tbody-loading');
+    });
+}
+
+// ── AJAX filter interceptor ───────────────────────────────────────────────────
+// Catches every .filter-form submit. If the page defines window.__ajaxFilterUpdate,
+// runs it instead of reloading. Saves/restores <main> scroll position.
+// Uses a generation counter to discard stale responses (abort stale requests).
+(function () {
+    var mainEl = document.querySelector('main');
+    var gen    = 0; // incremented on every submit; stale responses check against this
+
+    document.addEventListener('submit', function (e) {
+        if (!e.target.classList.contains('filter-form')) return;
+        if (typeof window.__ajaxFilterUpdate !== 'function') return;
+
+        e.preventDefault();
+
+        var form        = e.target;
+        var btn         = form.querySelector('[type=submit]');
+        var savedScroll = mainEl ? mainEl.scrollTop : 0;
+        var thisGen     = ++gen; // capture generation for this specific request
+
+        if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
+        showFilterLoading();
+
+        var params = new URLSearchParams(new FormData(form));
+        var url    = form.action + '?' + params;
+
+        history.pushState(null, '', url);
+        window.__saveFilterState(params);
+
+        Promise.resolve(window.__ajaxFilterUpdate(form, params, url))
+            .then(function () {
+                if (thisGen !== gen) return; // newer request already in flight — discard
+                hideFilterLoading();
+                if (mainEl) mainEl.scrollTop = savedScroll;
+                if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+            })
+            .catch(function (err) {
+                if (thisGen !== gen) return;
+                hideFilterLoading();
+                console.error('[filter] AJAX failed, falling back to full reload:', err);
+                if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+                window.location.href = url;
+            });
+    });
+
+    window.addEventListener('popstate', function () {
+        if (typeof window.__ajaxFilterUpdate !== 'function') return;
+        var form = document.querySelector('.filter-form');
+        if (!form) return;
+
+        var params      = new URLSearchParams(window.location.search);
+        var savedScroll = mainEl ? mainEl.scrollTop : 0;
+        var thisGen     = ++gen;
+
+        params.forEach(function (value, key) {
+            var el = form.elements[key];
+            if (el) el.value = value;
+        });
+        window.__saveFilterState(params);
+        showFilterLoading();
+
+        var url = window.location.pathname + window.location.search;
+        Promise.resolve(window.__ajaxFilterUpdate(form, params, url))
+            .then(function () {
+                if (thisGen !== gen) return;
+                hideFilterLoading();
+                if (mainEl) mainEl.scrollTop = savedScroll;
+            })
+            .catch(function () {
+                if (thisGen !== gen) return;
+                hideFilterLoading();
+            });
+    });
+})();
+
+// ── Live accuracy: pulse polling + 5-min auto-reconcile ───────────────────────
+//
+//   Page loads      → server already rendered data; reconcile runs at page-load
+//   User is active  → 30 s pulse detects webhook-triggered DB changes instantly
+//   Every 5 mins    → silent re-fetch catches anything the pulse might miss
+//
+(function () {
+    // Silent refresh: re-runs the current page's filter without showing the full
+    // loading UI — just a brief progress-bar flash so the user knows it updated.
+    function silentRefresh() {
+        if (typeof window.__ajaxFilterUpdate !== 'function') return;
+        var form = document.querySelector('.filter-form');
+        if (!form) return;
+        var params = new URLSearchParams(new FormData(form));
+        var url    = form.action + '?' + params;
+        var bar    = document.getElementById('filter-progress-bar');
+        if (bar) bar.style.display = 'block';
+        Promise.resolve(window.__ajaxFilterUpdate(form, params, url))
+            .then(function ()  { if (bar) bar.style.display = 'none'; })
+            .catch(function () { if (bar) bar.style.display = 'none'; });
+    }
+
+    // ── 30-second pulse: detect webhook / reconciliation job changes ──────────
+    var lastBust = null;
+    setInterval(function () {
+        if (document.visibilityState !== 'visible') return;
+        fetch('/analytics/pulse', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d) return;
+                if (lastBust === null) { lastBust = d.updated_at; return; }
+                if (d.updated_at > lastBust) { lastBust = d.updated_at; silentRefresh(); }
+            })
+            .catch(function () {});
+    }, 30000);
+
+    // ── 5-minute auto-reconcile while page is visible ─────────────────────────
+    var reconcileTimer = null;
+    function resetTimer() {
+        clearInterval(reconcileTimer);
+        if (document.visibilityState === 'visible') {
+            reconcileTimer = setInterval(function () {
+                if (document.visibilityState === 'visible') silentRefresh();
+            }, 5 * 60 * 1000);
+        }
+    }
+    document.addEventListener('visibilitychange', resetTimer);
+    resetTimer();
+})();
 </script>
 @stack('scripts')
 </body>

@@ -10,6 +10,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class SyncCustomersJob implements ShouldQueue
@@ -17,51 +18,73 @@ class SyncCustomersJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $timeout = 3600;
-    public int $tries = 2;
+    public int $tries   = 1; // resumable — no point retrying; dispatcher will re-queue
 
     public function __construct(private readonly int $shopModelId) {}
 
     public function handle(): void
     {
         $shop = PancakeShop::findOrFail($this->shopModelId);
-        $log = SyncLog::create([
-            'shop_id' => $shop->id,
-            'type' => 'customers',
-            'status' => 'running',
-            'started_at' => now(),
-        ]);
+
+        $lock = Cache::lock("sync_customers_lock_{$shop->id}", 3700);
+        if (!$lock->get()) {
+            Log::info("SyncCustomersJob: shop {$shop->shop_id} already syncing, skipping duplicate.");
+            return;
+        }
+
+        $log           = null;
+        $resumeKey     = 'sync_customers_page_' . $shop->id;
+        $startPage     = (int) Cache::get($resumeKey, 1);
+        $totalFetched  = 0;
+        $totalUpserted = 0;
 
         try {
-            $api = PancakeApiService::forShop($shop);
-            $totalFetched = 0;
-            $totalUpserted = 0;
+            $log = SyncLog::create([
+                'shop_id'    => $shop->id,
+                'type'       => 'customers',
+                'status'     => 'running',
+                'started_at' => now(),
+            ]);
 
-            foreach ($api->getAllCustomers() as $batch) {
-                $totalFetched += count($batch);
-                $upserted = $this->upsertBatch($shop->id, $batch);
-                $totalUpserted += $upserted;
+            $api = PancakeApiService::forShop($shop);
+
+            foreach ($api->getAllCustomers(null, $startPage) as $page => $batch) {
+                $totalFetched  += count($batch);
+                $totalUpserted += $this->upsertBatch($shop->id, $batch);
+
+                Cache::put($resumeKey, $page + 1, now()->addDays(7));
             }
 
+            Cache::forget($resumeKey);
             $shop->update(['last_synced_at' => now()]);
+
             $log->update([
-                'status' => 'success',
-                'records_fetched' => $totalFetched,
+                'status'           => 'success',
+                'records_fetched'  => $totalFetched,
                 'records_upserted' => $totalUpserted,
-                'finished_at' => now(),
+                'finished_at'      => now(),
             ]);
         } catch (\Throwable $e) {
-            Log::error("Customer sync failed for shop {$shop->shop_id}: {$e->getMessage()}");
-            $log->update([
-                'status' => 'failed',
-                'error_message' => $e->getMessage(),
-                'finished_at' => now(),
+            $resumedTo = (int) Cache::get($resumeKey, $startPage);
+            Log::error(
+                "SyncCustomersJob failed for shop {$shop->shop_id} " .
+                "(next resume page={$resumedTo}): {$e->getMessage()}"
+            );
+            $log?->update([
+                'status'           => 'failed',
+                'records_fetched'  => $totalFetched,
+                'records_upserted' => $totalUpserted,
+                'error_message'    => $e->getMessage(),
+                'finished_at'      => now(),
             ]);
+        } finally {
+            $lock->release();
         }
     }
 
     private function upsertBatch(int $shopId, array $batch): int
     {
-        $now = now()->format('Y-m-d H:i:s');
+        $now     = now()->format('Y-m-d H:i:s');
         $records = [];
 
         foreach ($batch as $raw) {
@@ -76,7 +99,7 @@ class SyncCustomersJob implements ShouldQueue
             }
             $r['created_at'] = $now;
             $r['updated_at'] = $now;
-            $records[] = $r;
+            $records[]       = $r;
         }
 
         Customer::upsert($records, ['shop_id', 'pancake_id'], [
@@ -103,7 +126,7 @@ class SyncCustomersJob implements ShouldQueue
 
         return [
             'shop_id'         => $shopId,
-            'pancake_id'      => (string)($raw['id'] ?? ''),
+            'pancake_id'      => (string) ($raw['id'] ?? ''),
             'name'            => $raw['name'] ?? null,
             'phone'           => $raw['phone_numbers'][0] ?? null,
             'email'           => $raw['emails'][0] ?? null,
@@ -114,15 +137,15 @@ class SyncCustomersJob implements ShouldQueue
             'ward'            => $ward,
             'address'         => $addr['full_address'] ?? null,
             'customer_level'  => $raw['level'] ?? null,
-            'is_new_customer' => (int)($raw['succeed_order_count'] ?? $raw['order_count'] ?? 0) === 0,
+            'is_new_customer' => (int) ($raw['succeed_order_count'] ?? $raw['order_count'] ?? 0) === 0,
             'is_wholesale'    => false,
-            'total_orders'    => (int)($raw['order_count'] ?? 0),
-            'total_spent'     => (float)($raw['purchased_amount'] ?? 0),
-            'reward_points'   => (float)($raw['reward_point'] ?? 0),
+            'total_orders'    => (int) ($raw['order_count'] ?? 0),
+            'total_spent'     => (float) ($raw['purchased_amount'] ?? 0),
+            'reward_points'   => (float) ($raw['reward_point'] ?? 0),
             'referred_by'     => $raw['referral_code'] ?? null,
             'tags'            => $raw['conversation_tags'] ?? null,
             'pancake_tags'    => array_map(fn($t) => $t['name'] ?? '', $raw['tags'] ?? []) ?: null,
-            'utm_source'      => isset($raw['order_sources'][0]) ? (string)$raw['order_sources'][0] : null,
+            'utm_source'      => isset($raw['order_sources'][0]) ? (string) $raw['order_sources'][0] : null,
             'first_order_at'  => null,
             'last_order_at'   => $this->parseDate($raw['last_order_at'] ?? null, true),
         ];

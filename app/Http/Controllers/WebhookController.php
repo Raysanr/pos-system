@@ -1,6 +1,7 @@
 <?php
 namespace App\Http\Controllers;
 
+use App\Jobs\RefreshOpenOrdersJob;
 use App\Jobs\SyncOrdersJob;
 use App\Models\PancakeShop;
 use Illuminate\Http\JsonResponse;
@@ -18,14 +19,14 @@ class WebhookController extends Controller
             return response()->json(['ok' => false], 401);
         }
 
-        // Log the raw payload once so you can inspect the exact format Pancake sends
-        Log::info('Pancake webhook received', ['payload' => $request->all()]);
+        $payload = $request->all();
 
-        // Pancake sends the Pancake shop_id (numeric) as `shop_id` inside the payload.
-        // `page_id` is the Facebook page ID — not what we store in PancakeShop::shop_id.
-        $payload  = $request->all();
-        $shopId   = (string) (
-            $payload['shop_id']         ??  // real Pancake shop ID — primary key
+        // Log once so we can verify the exact format Pancake sends.
+        Log::info('Pancake webhook received', ['payload' => $payload]);
+
+        // Pancake sends the numeric shop ID as `shop_id` inside the payload.
+        $shopId = (string) (
+            $payload['shop_id']         ??
             $payload['data']['shop_id'] ??
             ''
         );
@@ -42,13 +43,27 @@ class WebhookController extends Controller
             return response()->json(['ok' => true]);
         }
 
-        // Sync from 15 min ago to catch this change plus any near-concurrent ones
-        $fromDate = now()->subMinutes(15)->format('Y-m-d H:i:s');
-        dispatch(new SyncOrdersJob($shop->id, $fromDate));
+        // Extract order IDs from whatever structure Pancake uses.
+        // Try the most common locations; add more if the log reveals a different shape.
+        $orderIds = array_values(array_unique(array_filter([
+            $payload['order_id']        ?? null,
+            $payload['id']              ?? null,
+            $payload['data']['id']      ?? null,
+            $payload['data']['order_id'] ?? null,
+        ], fn($v) => $v !== null)));
 
-        // Bust the shop cache token so all controllers generate fresh cache keys on next load
+        if (!empty($orderIds)) {
+            // Targeted refresh: re-fetch only the order(s) Pancake told us changed.
+            // This updates the status even for orders created months ago.
+            dispatch(new RefreshOpenOrdersJob($shop->id, $orderIds));
+        } else {
+            // Payload didn't contain a recognisable order ID — fall back to a
+            // short window sync to catch new/recently-created orders.
+            $fromDate = now()->subMinutes(15)->format('Y-m-d H:i:s');
+            dispatch(new SyncOrdersJob($shop->id, $fromDate));
+        }
+
         $this->bustShopCache($shop->id);
-
         $this->startQueueWorker();
 
         return response()->json(['ok' => true]);
