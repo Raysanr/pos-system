@@ -18,7 +18,7 @@ class RtsAnalyticsController extends Controller
         $datePreset    = $this->detectDatePreset($dateFrom, $dateTo);
 
         $cacheKey = "rts_{$shop->id}_{$this->shopCacheBust($shop->id)}_{$dateFrom}_{$dateTo}_{$productFilter}";
-        $cached = Cache::remember($cacheKey, 300, function () use ($shop, $dateFrom, $dateTo, $productFilter) {
+        $cached = Cache::remember($cacheKey, 1800, function () use ($shop, $dateFrom, $dateTo, $productFilter) {
             return [
                 'rtsByProvince' => $this->getRtsByProvince($shop->id, $dateFrom, $dateTo, $productFilter),
                 'rtsByCourier'  => $this->getRtsByCourier($shop->id, $dateFrom, $dateTo, $productFilter),
@@ -33,6 +33,16 @@ class RtsAnalyticsController extends Controller
         $rtsTrend      = $cached['rtsTrend'];
         $returnReasons = $cached['returnReasons'];
         $rtsKpis       = $cached['rtsKpis'];
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'rtsKpis'       => $rtsKpis,
+                'rtsTrend'      => $rtsTrend,
+                'rtsByCourier'  => $rtsByCourier,
+                'rtsByProvince' => $rtsByProvince,
+                'returnReasons' => $returnReasons,
+            ]);
+        }
 
         return view('analytics.rts', compact(
             'shop', 'rtsByProvince', 'rtsByCourier', 'rtsTrend',

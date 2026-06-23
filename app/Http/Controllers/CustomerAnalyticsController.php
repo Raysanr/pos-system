@@ -18,14 +18,17 @@ class CustomerAnalyticsController extends Controller
         $datePreset    = $this->detectDatePreset($dateFrom, $dateTo);
 
         $cacheKey = "customers_{$shop->id}_{$this->shopCacheBust($shop->id)}_{$dateFrom}_{$dateTo}_{$productFilter}";
-        $cached = Cache::remember($cacheKey, 300, function () use ($shop, $dateFrom, $dateTo, $productFilter) {
+        $cached = Cache::remember($cacheKey, 1800, function () use ($shop, $dateFrom, $dateTo, $productFilter) {
+            // Compute new/returning first so totalCustomers uses the same source (orders table).
+            // The customers table may be out of sync with orders, causing new+returning > total.
+            $newVsReturning = $this->getNewVsReturning($shop->id, $dateFrom, $dateTo, $productFilter);
             return [
-                'totalCustomers'   => $this->baseCustomer($shop->id, $dateFrom, $dateTo, $productFilter)->count(),
+                'totalCustomers'   => $newVsReturning['new'] + $newVsReturning['returning'],
                 'genderStats'      => $this->getGenderStats($shop->id, $dateFrom, $dateTo, $productFilter),
                 'ageStats'         => $this->getOrderFrequencyStats($shop->id, $dateFrom, $dateTo, $productFilter),
                 'birthdayMonth'    => $this->getAcquisitionByMonthStats($shop->id, $dateFrom, $dateTo, $productFilter),
                 'topProvinces'     => $this->getTopProvinces($shop->id, $dateFrom, $dateTo, $productFilter),
-                'newVsReturning'   => $this->getNewVsReturning($shop->id, $dateFrom, $dateTo, $productFilter),
+                'newVsReturning'   => $newVsReturning,
                 'topCustomers'     => $this->getTopCustomers($shop->id, $dateFrom, $dateTo, $productFilter),
                 'peakPatterns'     => $this->getPeakOrderPatterns($shop->id, $dateFrom, $dateTo, $productFilter),
                 'basketSize'       => $this->getBasketSize($shop->id, $dateFrom, $dateTo, $productFilter),
@@ -45,6 +48,30 @@ class CustomerAnalyticsController extends Controller
         $basketSize      = $cached['basketSize'];
         $productAffinity = $cached['productAffinity'];
         $firstProducts   = $cached['firstProducts'];
+
+        if ($request->wantsJson()) {
+            $newPct = $totalCustomers > 0 ? round($newVsReturning['new'] / $totalCustomers * 100) : 0;
+            return response()->json([
+                'kpis' => [
+                    'totalCustomers' => $totalCustomers,
+                    'newCustomers'   => $newVsReturning['new'],
+                    'returning'      => $newVsReturning['returning'],
+                    'newPct'         => $newPct,
+                    'retPct'         => 100 - $newPct,
+                    'basketAvg'      => $basketSize['avg'],
+                ],
+                'genderStats'     => $genderStats,
+                'ageStats'        => $ageStats,
+                'birthdayMonth'   => $birthdayMonth,
+                'peakDays'        => $peakPatterns['days'],
+                'peakHours'       => $peakPatterns['hours'],
+                'basketDist'      => $basketSize['distribution'],
+                'topProvinces'    => $topProvinces,
+                'topCustomers'    => $topCustomers,
+                'firstProducts'   => $firstProducts,
+                'productAffinity' => $productAffinity,
+            ]);
+        }
 
         return view('analytics.customers', compact(
             'shop', 'totalCustomers', 'genderStats', 'ageStats',
@@ -89,10 +116,30 @@ class CustomerAnalyticsController extends Controller
 
     private function getGenderStats(int $shopId, ?string $dateFrom, ?string $dateTo, ?string $productFilter): array
     {
-        $rows = $this->baseCustomer($shopId, $dateFrom, $dateTo, $productFilter)
-            ->select('gender', DB::raw('COUNT(*) as count'))
-            ->groupBy('gender')
-            ->get();
+        // Use orders as the source of truth (same base as totalCustomers) and LEFT JOIN
+        // customers for gender so that customers missing from the customers table are
+        // still counted (they land in Unknown instead of being silently excluded).
+        $q = DB::table('orders as o')
+            ->where('o.shop_id', $shopId)
+            ->whereNotNull('o.customer_pancake_id')
+            ->leftJoin('customers as c', function ($join) use ($shopId) {
+                $join->on('c.pancake_id', '=', 'o.customer_pancake_id')
+                     ->where('c.shop_id', '=', $shopId);
+            })
+            ->select('c.gender', DB::raw('COUNT(DISTINCT o.customer_pancake_id) as count'))
+            ->groupBy('c.gender');
+
+        if ($dateFrom && $dateTo) {
+            $q->whereBetween('o.ordered_at', [$dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
+        }
+        if ($productFilter) {
+            $q->whereRaw(
+                "EXISTS (SELECT 1 FROM json_each(o.items) as item WHERE json_extract(item.value, '$.variation_info.name') = ? COLLATE NOCASE)",
+                [$productFilter]
+            );
+        }
+
+        $rows = $q->get();
 
         $normalized = [];
         foreach ($rows as $row) {
@@ -109,45 +156,50 @@ class CustomerAnalyticsController extends Controller
 
     private function getOrderFrequencyStats(int $shopId, ?string $dateFrom, ?string $dateTo, ?string $productFilter): array
     {
-        $q = DB::table('orders')
+        $sub = DB::table('orders')
             ->where('shop_id', $shopId)
             ->whereNotNull('customer_pancake_id')
             ->select('customer_pancake_id', DB::raw('COUNT(*) as cnt'))
             ->groupBy('customer_pancake_id');
-        $this->applyOrderFilters($q, $dateFrom, $dateTo, $productFilter);
+        $this->applyOrderFilters($sub, $dateFrom, $dateTo, $productFilter);
 
-        $dist   = $q->get();
-        $groups = ['1 order' => 0, '2 orders' => 0, '3 orders' => 0, '4 orders' => 0, '5+ orders' => 0];
-        foreach ($dist as $row) {
-            if ($row->cnt == 1)     $groups['1 order']++;
-            elseif ($row->cnt == 2) $groups['2 orders']++;
-            elseif ($row->cnt == 3) $groups['3 orders']++;
-            elseif ($row->cnt == 4) $groups['4 orders']++;
-            else                    $groups['5+ orders']++;
-        }
+        $row = DB::table($sub, 'sub')->selectRaw(
+            'SUM(CASE WHEN cnt = 1 THEN 1 ELSE 0 END) as c1, ' .
+            'SUM(CASE WHEN cnt = 2 THEN 1 ELSE 0 END) as c2, ' .
+            'SUM(CASE WHEN cnt = 3 THEN 1 ELSE 0 END) as c3, ' .
+            'SUM(CASE WHEN cnt = 4 THEN 1 ELSE 0 END) as c4, ' .
+            'SUM(CASE WHEN cnt >= 5 THEN 1 ELSE 0 END) as c5plus'
+        )->first();
+
+        $groups = [
+            '1 order'   => (int) ($row->c1    ?? 0),
+            '2 orders'  => (int) ($row->c2    ?? 0),
+            '3 orders'  => (int) ($row->c3    ?? 0),
+            '4 orders'  => (int) ($row->c4    ?? 0),
+            '5+ orders' => (int) ($row->c5plus ?? 0),
+        ];
         return ['labels' => array_keys($groups), 'data' => array_values($groups)];
     }
 
     private function getAcquisitionByMonthStats(int $shopId, ?string $dateFrom, ?string $dateTo, ?string $productFilter): array
     {
-        $q = DB::table('orders')
+        $sub = DB::table('orders')
             ->where('shop_id', $shopId)
             ->whereNotNull('customer_pancake_id')
             ->whereNotNull('ordered_at')
             ->selectRaw('customer_pancake_id, MIN(ordered_at) as first_order')
             ->groupBy('customer_pancake_id');
-        $this->applyOrderFilters($q, $dateFrom, $dateTo, $productFilter);
+        $this->applyOrderFilters($sub, $dateFrom, $dateTo, $productFilter);
 
-        $byMonth = [];
-        foreach ($q->get() as $row) {
-            $m = (int) date('n', strtotime($row->first_order));
-            $byMonth[$m] = ($byMonth[$m] ?? 0) + 1;
-        }
+        $byMonth = DB::table($sub, 'sub')
+            ->selectRaw("CAST(strftime('%m', first_order) AS INTEGER) as month, COUNT(*) as cnt")
+            ->groupByRaw("strftime('%m', first_order)")
+            ->pluck('cnt', 'month');
 
         $labels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         $data   = [];
         for ($m = 1; $m <= 12; $m++) {
-            $data[] = $byMonth[$m] ?? 0;
+            $data[] = (int) ($byMonth[$m] ?? 0);
         }
         return ['labels' => $labels, 'data' => $data];
     }
@@ -176,17 +228,21 @@ class CustomerAnalyticsController extends Controller
 
     private function getNewVsReturning(int $shopId, ?string $dateFrom, ?string $dateTo, ?string $productFilter): array
     {
-        $q = DB::table('orders')
+        $sub = DB::table('orders')
             ->where('shop_id', $shopId)
             ->whereNotNull('customer_pancake_id')
             ->select('customer_pancake_id', DB::raw('COUNT(*) as cnt'))
             ->groupBy('customer_pancake_id');
-        $this->applyOrderFilters($q, $dateFrom, $dateTo, $productFilter);
+        $this->applyOrderFilters($sub, $dateFrom, $dateTo, $productFilter);
 
-        $dist = $q->get();
+        $row = DB::table($sub, 'sub')->selectRaw(
+            'SUM(CASE WHEN cnt = 1 THEN 1 ELSE 0 END) as new_count, ' .
+            'SUM(CASE WHEN cnt > 1 THEN 1 ELSE 0 END) as ret_count'
+        )->first();
+
         return [
-            'new'       => $dist->where('cnt', 1)->count(),
-            'returning' => $dist->where('cnt', '>', 1)->count(),
+            'new'       => (int) ($row->new_count ?? 0),
+            'returning' => (int) ($row->ret_count ?? 0),
         ];
     }
 
@@ -207,17 +263,22 @@ class CustomerAnalyticsController extends Controller
         $this->applyOrderFilters($base, $dateFrom, $dateTo, $productFilter);
 
         $dayRows  = (clone $base)
-            ->selectRaw("CAST(strftime('%w', ordered_at) AS INTEGER) as dow, COUNT(*) as cnt")
-            ->groupByRaw("strftime('%w', ordered_at)")
+            ->selectRaw("CAST(strftime('%w', ordered_at, '+8 hours') AS INTEGER) as dow, COUNT(*) as cnt")
+            ->groupByRaw("strftime('%w', ordered_at, '+8 hours')")
             ->get()->keyBy('dow');
 
         $hourRows = (clone $base)
-            ->selectRaw("CAST(strftime('%H', ordered_at) AS INTEGER) as hr, COUNT(*) as cnt")
-            ->groupByRaw("strftime('%H', ordered_at)")
+            ->selectRaw("CAST(strftime('%H', ordered_at, '+8 hours') AS INTEGER) as hr, COUNT(*) as cnt")
+            ->groupByRaw("strftime('%H', ordered_at, '+8 hours')")
             ->get()->keyBy('hr');
 
         $dayData    = array_map(fn($d) => (int)($dayRows->get($d)?->cnt  ?? 0), range(0, 6));
-        $hourLabels = array_map(fn($h) => str_pad($h, 2, '0', STR_PAD_LEFT) . ':00', range(0, 23));
+        $hourLabels = array_map(function($h) {
+            if ($h === 0)  return '12am';
+            if ($h < 12)   return $h . 'am';
+            if ($h === 12) return '12pm';
+            return ($h - 12) . 'pm';
+        }, range(0, 23));
         $hourData   = array_map(fn($h) => (int)($hourRows->get($h)?->cnt ?? 0), range(0, 23));
 
         return [

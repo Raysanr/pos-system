@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Log;
 class PancakeApiService
 {
     private const BASE_URL = 'https://pos.pages.fm/api/v1';
-    private const PER_PAGE = 100;
+    public const  PER_PAGE = 50; // public so jobs can compare batch size vs. page size
 
     public function __construct(
         private readonly string $apiKey,
@@ -82,9 +82,13 @@ class PancakeApiService
         return $this->parseResponse($response);
     }
 
-    public function getAllCustomers(callable $onBatch = null): \Generator
+    /**
+     * Yields [$page => $items] so callers can track which page was processed.
+     * $startPage lets a resumable job continue from where it left off.
+     */
+    public function getAllCustomers(?callable $onBatch = null, int $startPage = 1): \Generator
     {
-        $page = 1;
+        $page = $startPage;
         do {
             $result = $this->getCustomers($page);
             $items = $result['data'] ?? [];
@@ -92,7 +96,7 @@ class PancakeApiService
             if (empty($items)) break;
 
             if ($onBatch) $onBatch($items, $page);
-            yield $items;
+            yield $page => $items;
 
             $page++;
             $hasMore = count($items) === self::PER_PAGE;
@@ -111,9 +115,13 @@ class PancakeApiService
         return $this->parseResponse($response);
     }
 
-    public function getAllOrders(callable $onBatch = null, array $filters = []): \Generator
+    /**
+     * Yields [$page => $items] so callers can track which page was processed.
+     * $startPage lets a resumable job continue from where it left off.
+     */
+    public function getAllOrders(?callable $onBatch = null, array $filters = [], int $startPage = 1): \Generator
     {
-        $page = 1;
+        $page = $startPage;
         do {
             $result = $this->getOrders($page, $filters);
             $items = $result['data'] ?? [];
@@ -121,13 +129,76 @@ class PancakeApiService
             if (empty($items)) break;
 
             if ($onBatch) $onBatch($items, $page);
-            yield $items;
+            yield $page => $items;
 
             $page++;
             $hasMore = count($items) === self::PER_PAGE;
 
             if ($hasMore) usleep(200000);
         } while ($hasMore);
+    }
+
+    /**
+     * Fetch multiple order pages concurrently via Http::pool().
+     * Returns array keyed by page number.
+     * Value is array of items on success, or null if the request failed (vs [] for a truly empty page).
+     */
+    public function getOrderPagesBatch(array $pages, array $filters = []): array
+    {
+        if (empty($pages)) return [];
+
+        $baseUrl = self::BASE_URL . "/shops/{$this->shopId}/orders";
+        $apiKey  = $this->apiKey;
+        $perPage = self::PER_PAGE;
+
+        $responses = Http::pool(function ($pool) use ($pages, $filters, $baseUrl, $apiKey, $perPage) {
+            $requests = [];
+            foreach ($pages as $page) {
+                $requests[] = $pool->as("p{$page}")
+                    ->withHeaders(['Authorization' => "Bearer {$apiKey}"])
+                    ->connectTimeout(15)
+                    ->timeout(180)
+                    ->get($baseUrl, array_merge($filters, [
+                        'page'      => $page,
+                        'page_size' => $perPage,
+                        'api_key'   => $apiKey,
+                    ]));
+            }
+            return $requests;
+        });
+
+        $result = [];
+        foreach ($pages as $page) {
+            $resp = $responses["p{$page}"] ?? null;
+            if ($resp instanceof Response && $resp->successful()) {
+                $data          = $resp->json('data');
+                $result[$page] = is_array($data) ? $data : [];
+            } else {
+                // null = fetch failed; caller can distinguish from [] (no more data)
+                if ($resp instanceof \Throwable) {
+                    Log::warning("Parallel fetch failed page {$page}: {$resp->getMessage()}");
+                } elseif ($resp instanceof Response) {
+                    Log::warning("Parallel fetch HTTP {$resp->status()} on page {$page}");
+                }
+                $result[$page] = null;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Fetch a single order by its Pancake ID.
+     * Returns the raw order array or null if not found / API error.
+     */
+    public function getOrderById(string $orderId): ?array
+    {
+        $response = $this->get("/shops/{$this->shopId}/orders/{$orderId}");
+        if ($response->failed()) return null;
+        $body = $response->json();
+        // Pancake may wrap the order in a 'data' key or return it directly.
+        $order = $body['data'] ?? (isset($body['id']) ? $body : null);
+        return is_array($order) ? $order : null;
     }
 
     public function getStatistics(array $params = []): array
@@ -145,8 +216,9 @@ class PancakeApiService
     private function get(string $endpoint, array $params = []): Response
     {
         return Http::withHeaders(['Authorization' => "Bearer {$this->apiKey}"])
-            ->timeout(30)
-            ->retry(3, 500)
+            ->connectTimeout(15)
+            ->timeout(180)  // 3 min — Pancake pages can be 2 MB+; 30 s was too short
+            ->retry(2, 3000)
             ->get(self::BASE_URL . $endpoint, array_merge($params, [
                 'api_key' => $this->apiKey,
             ]));

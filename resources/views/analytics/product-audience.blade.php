@@ -47,7 +47,7 @@
                  this.selected = val;
                  this.open = false;
                  this.search = '';
-                 this.$nextTick(() => this.$el.closest('form').submit());
+                 this.$nextTick(() => this.$el.closest('form').requestSubmit());
              },
              toggle() {
                  this.open = !this.open;
@@ -171,7 +171,8 @@
 
 @section('content')
 
-@if(!$selectedProduct)
+{{-- No-product state --}}
+<div id="content-no-product" @if($selectedProduct) hidden @endif>
 <div class="flex flex-col items-center justify-center py-32 text-center">
     <div class="w-20 h-20 rounded-2xl flex items-center justify-center mb-5" style="background:rgba(245,166,35,0.08); border:1px solid rgba(245,166,35,0.15);">
         <svg style="width:36px;height:36px;color:#F5A623;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -181,13 +182,15 @@
     <p class="text-base font-semibold" style="color:#334155;">Choose a product to get started</p>
     <p class="text-sm mt-1.5" style="color:#94A3B8;">Select a product from the filter above to view its audience data.</p>
 </div>
+</div>
 
-@elseif($data)
+{{-- Data state --}}
+<div id="content-data" @if(!$selectedProduct || !$data) hidden @endif>
 
 {{-- KPI Cards --}}
 <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
     @php
-    $kpiDefs = [
+    $kpiDefs = $data ? [
         ['label'=>'Total Orders',   'value'=>number_format($data['kpis']['total_orders']),                           'sub'=>'for this product',    'color'=>'#1E40AF', 'bg'=>'rgba(30,64,175,0.08)',   'border'=>'#DBEAFE',
          'icon'=>'M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z'],
         ['label'=>'Average Age',    'value'=>$data['kpis']['avg_age'] ? $data['kpis']['avg_age'].' yrs' : '—',      'sub'=>'from order notes',    'color'=>'#8B5CF6', 'bg'=>'rgba(139,92,246,0.08)',  'border'=>'#EDE9FE',
@@ -198,7 +201,7 @@
          'icon'=>'M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6'],
         ['label'=>'Bottles Sold',   'value'=>number_format($data['kpis']['total_bottles']),                          'sub'=>'delivered bottles',   'color'=>'#10B981', 'bg'=>'rgba(16,185,129,0.08)',  'border'=>'#D1FAE5',
          'icon'=>'M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z'],
-    ];
+    ] : [];
     @endphp
     @foreach($kpiDefs as $k)
     <div class="kpi-card bg-white rounded-xl shadow-sm overflow-hidden" style="border:1px solid {{ $k['border'] }}; border-left:4px solid {{ $k['color'] }};">
@@ -211,7 +214,7 @@
                     </svg>
                 </div>
             </div>
-            <p class="text-3xl font-bold font-mono" style="color:{{ $k['color'] }};">{{ $k['value'] }}</p>
+            <p data-kpi="{{ $loop->index }}" class="text-3xl font-bold font-mono" style="color:{{ $k['color'] }};">{{ $k['value'] }}</p>
             <p class="text-xs mt-1.5" style="color:#94A3B8;">{{ $k['sub'] }}</p>
         </div>
     </div>
@@ -224,62 +227,66 @@
     <div class="bg-white rounded-xl shadow-sm p-5" style="border:1px solid #DBEAFE;">
         <h3 class="text-sm font-semibold mb-0.5" style="color:#1E293B;">Age Groups</h3>
         <p class="text-xs mb-4" style="color:#94A3B8;">Distribution of customer ages (from order notes)</p>
-        @if(array_sum($data['ageGroups']['data']) > 0)
-        <div class="chart-wrap" style="min-height:180px;">
-            <div class="chart-skeleton" id="sk-age">
-                <div style="display:flex;align-items:flex-end;gap:10px;height:160px;padding-top:20px;">
-                    @foreach([40,60,80,70,50,30] as $h)
-                    <div class="sk-bar" style="flex:1;height:{{ $h }}%;"></div>
-                    @endforeach
+        <div id="age-chart-section" @if(!$data || array_sum($data['ageGroups']['data']) <= 0) hidden @endif>
+            <div class="chart-wrap" style="min-height:180px;">
+                <div class="chart-skeleton" id="sk-age">
+                    <div style="display:flex;align-items:flex-end;gap:10px;height:160px;padding-top:20px;">
+                        @foreach([40,60,80,70,50,30] as $h)
+                        <div class="sk-bar" style="flex:1;height:{{ $h }}%;"></div>
+                        @endforeach
+                    </div>
                 </div>
+                <canvas id="ageChart" class="chart-canvas" height="180"></canvas>
             </div>
-            <canvas id="ageChart" class="chart-canvas" height="180"></canvas>
         </div>
-        @else
-        <div class="empty-state" style="min-height:160px;">
-            <div class="empty-state-icon">
-                <svg style="width:22px;height:22px;color:#94A3B8;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
-                </svg>
+        <div id="age-empty-section" @if($data && array_sum($data['ageGroups']['data']) > 0) hidden @endif>
+            <div class="empty-state" style="min-height:160px;">
+                <div class="empty-state-icon">
+                    <svg style="width:22px;height:22px;color:#94A3B8;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+                    </svg>
+                </div>
+                <p class="title">No age data yet</p>
+                <p class="hint">Run <code style="font-family:'Fira Code',monospace;font-size:11px;background:#F1F5F9;padding:1px 4px;border-radius:3px;">app:extract-order-demographics</code> to extract age from notes.</p>
             </div>
-            <p class="title">No age data yet</p>
-            <p class="hint">Run <code style="font-family:'Fira Code',monospace;font-size:11px;background:#F1F5F9;padding:1px 4px;border-radius:3px;">app:extract-order-demographics</code> to extract age from notes.</p>
         </div>
-        @endif
     </div>
 
     <div class="bg-white rounded-xl shadow-sm p-5" style="border:1px solid #DBEAFE;">
         <h3 class="text-sm font-semibold mb-0.5" style="color:#1E293B;">Gender Split</h3>
         <p class="text-xs mb-4" style="color:#94A3B8;">From customer profiles</p>
-        @if(array_sum($data['gender']['data']) > 0)
-        <div class="chart-wrap" style="min-height:180px;">
-            <div class="chart-skeleton" id="sk-gender">
-                <div class="sk-bar" style="width:140px;height:140px;border-radius:50%;margin:0 auto;"></div>
-            </div>
-            <div class="flex items-center justify-center">
-                <canvas id="genderChart" class="chart-canvas" style="max-height:200px;max-width:200px;"></canvas>
-            </div>
-            <div class="flex justify-center gap-4 mt-3 flex-wrap">
-                @foreach($data['gender']['labels'] as $i => $label)
-                @php $gColors = ['#F5A623','#0F172A','#94A3B8']; @endphp
-                <div class="flex items-center gap-1.5">
-                    <span class="w-2.5 h-2.5 rounded-full" style="background:{{ $gColors[$i % 3] }};"></span>
-                    <span class="text-xs" style="color:#475569;">{{ $label }} ({{ number_format($data['gender']['data'][$i]) }})</span>
+        <div id="gender-chart-section" @if(!$data || array_sum($data['gender']['data']) <= 0) hidden @endif>
+            <div class="chart-wrap" style="min-height:180px;">
+                <div class="chart-skeleton" id="sk-gender">
+                    <div class="sk-bar" style="width:140px;height:140px;border-radius:50%;margin:0 auto;"></div>
                 </div>
-                @endforeach
+                <div class="flex items-center justify-center">
+                    <canvas id="genderChart" class="chart-canvas" style="max-height:200px;max-width:200px;"></canvas>
+                </div>
+                <div id="gender-legend" class="flex justify-center gap-4 mt-3 flex-wrap">
+                    @if($data && array_sum($data['gender']['data']) > 0)
+                    @foreach($data['gender']['labels'] as $i => $label)
+                    @php $gColors = ['#F5A623','#0F172A','#94A3B8']; @endphp
+                    <div class="flex items-center gap-1.5">
+                        <span class="w-2.5 h-2.5 rounded-full" style="background:{{ $gColors[$i % 3] }};"></span>
+                        <span class="text-xs" style="color:#475569;">{{ $label }} ({{ number_format($data['gender']['data'][$i]) }})</span>
+                    </div>
+                    @endforeach
+                    @endif
+                </div>
             </div>
         </div>
-        @else
-        <div class="empty-state" style="min-height:160px;">
-            <div class="empty-state-icon">
-                <svg style="width:22px;height:22px;color:#94A3B8;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/>
-                </svg>
+        <div id="gender-empty-section" @if($data && array_sum($data['gender']['data']) > 0) hidden @endif>
+            <div class="empty-state" style="min-height:160px;">
+                <div class="empty-state-icon">
+                    <svg style="width:22px;height:22px;color:#94A3B8;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/>
+                    </svg>
+                </div>
+                <p class="title">No gender data</p>
+                <p class="hint">Gender data comes from customer profiles synced from Pancake.</p>
             </div>
-            <p class="title">No gender data</p>
-            <p class="hint">Gender data comes from customer profiles synced from Pancake.</p>
         </div>
-        @endif
     </div>
 
 </div>
@@ -290,147 +297,174 @@
     <div class="bg-white rounded-xl shadow-sm p-5" style="border:1px solid #DBEAFE;">
         <h3 class="text-sm font-semibold mb-0.5" style="color:#1E293B;">Health Conditions</h3>
         <p class="text-xs mb-4" style="color:#94A3B8;">Extracted from order notes</p>
-        @if(count($data['healthConditions']['labels']) > 0)
-        <div class="chart-wrap" style="min-height:220px;">
-            <div class="chart-skeleton" id="sk-health">
-                <div style="display:flex;flex-direction:column;gap:10px;padding:4px 0;">
-                    @foreach([85,55,40,25] as $w)
-                    <div class="sk-bar" style="width:{{ $w }}%;height:22px;"></div>
-                    @endforeach
+        <div id="health-chart-section" @if(!$data || count($data['healthConditions']['labels']) <= 0) hidden @endif>
+            <div class="chart-wrap" style="min-height:220px;">
+                <div class="chart-skeleton" id="sk-health">
+                    <div style="display:flex;flex-direction:column;gap:10px;padding:4px 0;">
+                        @foreach([85,55,40,25] as $w)
+                        <div class="sk-bar" style="width:{{ $w }}%;height:22px;"></div>
+                        @endforeach
+                    </div>
                 </div>
+                <canvas id="healthChart" class="chart-canvas" height="220"></canvas>
             </div>
-            <canvas id="healthChart" class="chart-canvas" height="220"></canvas>
         </div>
-        @else
-        <div class="empty-state" style="min-height:180px;">
-            <div class="empty-state-icon">
-                <svg style="width:22px;height:22px;color:#94A3B8;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                </svg>
+        <div id="health-empty-section" @if($data && count($data['healthConditions']['labels']) > 0) hidden @endif>
+            <div class="empty-state" style="min-height:180px;">
+                <div class="empty-state-icon">
+                    <svg style="width:22px;height:22px;color:#94A3B8;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                    </svg>
+                </div>
+                <p class="title">No health conditions found</p>
+                <p class="hint">Run <code style="font-family:'Fira Code',monospace;font-size:11px;background:#F1F5F9;padding:1px 4px;border-radius:3px;">app:extract-order-demographics</code> to extract from notes.</p>
             </div>
-            <p class="title">No health conditions found</p>
-            <p class="hint">Run <code style="font-family:'Fira Code',monospace;font-size:11px;background:#F1F5F9;padding:1px 4px;border-radius:3px;">app:extract-order-demographics</code> to extract from notes.</p>
         </div>
-        @endif
     </div>
 
     <div class="bg-white rounded-xl shadow-sm p-5" style="border:1px solid #DBEAFE;">
         <h3 class="text-sm font-semibold mb-0.5" style="color:#1E293B;">Top Provinces</h3>
         <p class="text-xs mb-4" style="color:#94A3B8;">Orders by province (top 15)</p>
-        @if(count($data['provinces']['labels']) > 0)
-        <div class="chart-wrap" style="min-height:220px;">
-            <div class="chart-skeleton" id="sk-prov">
-                <div style="display:flex;flex-direction:column;gap:10px;padding:4px 0;">
-                    @foreach([100,80,65,55,45,35,25] as $w)
-                    <div class="sk-bar" style="width:{{ $w }}%;height:20px;"></div>
-                    @endforeach
+        <div id="prov-chart-section" @if(!$data || count($data['provinces']['labels']) <= 0) hidden @endif>
+            <div class="chart-wrap" style="min-height:220px;">
+                <div class="chart-skeleton" id="sk-prov">
+                    <div style="display:flex;flex-direction:column;gap:10px;padding:4px 0;">
+                        @foreach([100,80,65,55,45,35,25] as $w)
+                        <div class="sk-bar" style="width:{{ $w }}%;height:20px;"></div>
+                        @endforeach
+                    </div>
                 </div>
+                <canvas id="provincesChart" class="chart-canvas" height="220"></canvas>
             </div>
-            <canvas id="provincesChart" class="chart-canvas" height="220"></canvas>
         </div>
-        @else
-        <div class="empty-state" style="min-height:180px;">
-            <div class="empty-state-icon">
-                <svg style="width:22px;height:22px;color:#94A3B8;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/>
-                </svg>
+        <div id="prov-empty-section" @if($data && count($data['provinces']['labels']) > 0) hidden @endif>
+            <div class="empty-state" style="min-height:180px;">
+                <div class="empty-state-icon">
+                    <svg style="width:22px;height:22px;color:#94A3B8;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/>
+                    </svg>
+                </div>
+                <p class="title">No province data</p>
+                <p class="hint">Sync orders to populate location data.</p>
             </div>
-            <p class="title">No province data</p>
-            <p class="hint">Sync orders to populate location data.</p>
         </div>
-        @endif
     </div>
 
 </div>
 
 {{-- Row 3: New vs Repeat + Top Customers --}}
+@php
+    $nvr     = $data ? $data['newVsReturning'] : ['new' => 0, 'returning' => 0];
+    $nvrTotal = $nvr['new'] + $nvr['returning'];
+@endphp
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
-    <div class="bg-white rounded-xl shadow-sm p-5" style="border:1px solid #DBEAFE;">
+    {{-- New vs Repeat Buyers --}}
+    <div class="bg-white rounded-xl shadow-sm p-5 flex flex-col" style="border:1px solid #DBEAFE;">
         <h3 class="text-sm font-semibold mb-0.5" style="color:#1E293B;">New vs Repeat Buyers</h3>
         <p class="text-xs mb-4" style="color:#94A3B8;">Customers who bought this product once vs. multiple times</p>
-        @php $nvr = $data['newVsReturning']; @endphp
-        @if($nvr['new'] + $nvr['returning'] > 0)
-        <div class="chart-wrap" style="min-height:160px;">
-            <div class="chart-skeleton" id="sk-nvr">
-                <div class="sk-bar" style="width:160px;height:160px;border-radius:50%;margin:0 auto;"></div>
-            </div>
-            <div class="flex items-center justify-center">
+
+        <div id="nvr-chart-section" class="flex-1 flex flex-col items-center justify-center gap-5" @if($nvr['new'] + $nvr['returning'] <= 0) hidden @endif>
+            {{-- Donut --}}
+            <div class="chart-wrap" style="width:180px;height:180px;flex-shrink:0;">
+                <div class="chart-skeleton" id="sk-nvr" style="display:flex;align-items:center;justify-content:center;">
+                    <div class="sk-bar" style="width:160px;height:160px;border-radius:50%;"></div>
+                </div>
                 <canvas id="nvrChart" class="chart-canvas" style="max-height:180px;max-width:180px;"></canvas>
             </div>
-        </div>
-        @else
-        <div class="empty-state" style="min-height:180px;">
-            <div class="empty-state-icon">
-                <svg style="width:22px;height:22px;color:#94A3B8;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-                </svg>
+            {{-- Stat boxes --}}
+            <div class="grid grid-cols-2 gap-3 w-full">
+                <div class="rounded-xl p-3.5 text-center" style="background:rgba(245,166,35,0.07);border:1px solid rgba(245,166,35,0.22);">
+                    <p id="nvr-stat-new" class="text-2xl font-bold font-mono" style="color:#F5A623;">{{ number_format($nvr['new']) }}</p>
+                    <p class="text-xs font-semibold mt-1" style="color:#334155;">First-time</p>
+                    <p id="nvr-stat-new-pct" class="text-xs mt-0.5" style="color:#94A3B8;">{{ $nvrTotal > 0 ? round($nvr['new'] / $nvrTotal * 100) : 0 }}% of buyers</p>
+                </div>
+                <div class="rounded-xl p-3.5 text-center" style="background:rgba(30,64,175,0.07);border:1px solid rgba(30,64,175,0.18);">
+                    <p id="nvr-stat-returning" class="text-2xl font-bold font-mono" style="color:#1E40AF;">{{ number_format($nvr['returning']) }}</p>
+                    <p class="text-xs font-semibold mt-1" style="color:#334155;">Repeat buyers</p>
+                    <p id="nvr-stat-ret-pct" class="text-xs mt-0.5" style="color:#94A3B8;">{{ $nvrTotal > 0 ? round($nvr['returning'] / $nvrTotal * 100) : 0 }}% of buyers</p>
+                </div>
             </div>
-            <p class="title">No buyer data</p>
-            <p class="hint">Sync orders to see new vs. repeat buyer breakdown.</p>
         </div>
-        @endif
+
+        <div id="nvr-empty-section" class="flex-1" @if($nvr['new'] + $nvr['returning'] > 0) hidden @endif>
+            <div class="empty-state" style="min-height:180px;">
+                <div class="empty-state-icon">
+                    <svg style="width:22px;height:22px;color:#94A3B8;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                    </svg>
+                </div>
+                <p class="title">No buyer data</p>
+                <p class="hint">Sync orders to see new vs. repeat buyer breakdown.</p>
+            </div>
+        </div>
     </div>
 
-    <div class="bg-white rounded-xl shadow-sm p-5" style="border:1px solid #DBEAFE;">
-        <h3 class="text-sm font-semibold mb-0.5" style="color:#1E293B;">Top Customers</h3>
-        <p class="text-xs mb-4" style="color:#94A3B8;">By total spent on this product</p>
-        @if(count((array)$data['topCustomers']) > 0)
-        <div class="overflow-x-auto">
+    {{-- Top Customers --}}
+    <div class="bg-white rounded-xl shadow-sm overflow-hidden flex flex-col" style="border:1px solid #DBEAFE;">
+        <div class="px-5 py-4 flex-none" style="border-bottom:1px solid #F1F5F9;">
+            <h3 class="text-sm font-semibold" style="color:#1E293B;">Top Customers</h3>
+            <p class="text-xs mt-0.5" style="color:#94A3B8;">By total spent on this product</p>
+        </div>
+
+        <div id="customers-table-section" class="overflow-y-auto flex-1" style="max-height:520px;" @if(!$data || count((array)$data['topCustomers']) <= 0) hidden @endif>
             <table class="w-full text-xs">
-                <thead>
-                    <tr style="border-bottom:1px solid #F1F5F9;">
-                        <th class="text-left pb-2.5 font-semibold uppercase tracking-wide" style="color:#94A3B8;">#</th>
-                        <th class="text-left pb-2.5 font-semibold uppercase tracking-wide" style="color:#94A3B8;">Name</th>
-                        <th class="text-left pb-2.5 font-semibold uppercase tracking-wide" style="color:#94A3B8;">Province</th>
-                        <th class="text-right pb-2.5 font-semibold uppercase tracking-wide" style="color:#94A3B8;">Orders</th>
-                        <th class="text-right pb-2.5 font-semibold uppercase tracking-wide" style="color:#94A3B8;">Spent</th>
+                <thead class="sticky top-0">
+                    <tr style="background:#F8FAFC; border-bottom:1px solid #F1F5F9;">
+                        <th class="px-3 py-2.5 text-left font-semibold uppercase tracking-wide" style="color:#94A3B8;">#</th>
+                        <th class="px-3 py-2.5 text-left font-semibold uppercase tracking-wide" style="color:#94A3B8;">Name</th>
+                        <th class="px-3 py-2.5 text-left font-semibold uppercase tracking-wide" style="color:#94A3B8;">Province</th>
+                        <th class="px-3 py-2.5 text-right font-semibold uppercase tracking-wide" style="color:#94A3B8;">Orders</th>
+                        <th class="px-3 py-2.5 text-right font-semibold uppercase tracking-wide" style="color:#94A3B8;">Spent</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody id="tbody-audience-customers">
+                    @if($data)
                     @foreach($data['topCustomers'] as $i => $c)
                     <tr style="border-top:1px solid #F8FAFC; transition:background 0.12s;"
                         onmouseover="this.style.background='#F0F7FF'" onmouseout="this.style.background=''">
-                        <td class="py-2.5 pr-2">
+                        <td class="px-3 py-2.5">
                             <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold font-mono"
                                  style="background:{{ $i < 3 ? 'rgba(245,166,35,0.12)' : '#F1F5F9' }}; color:{{ $i < 3 ? '#D97706' : '#64748B' }};">
                                 {{ $i + 1 }}
                             </div>
                         </td>
-                        <td class="py-2.5 pr-3">
+                        <td class="px-3 py-2.5">
                             <p class="font-semibold" style="color:#1E293B;">{{ $c->name ?? '—' }}</p>
                             <p style="color:#94A3B8;">{{ $c->gender ?? '' }}</p>
                         </td>
-                        <td class="py-2.5 pr-3" style="color:#64748B;">{{ $c->province ?? '—' }}</td>
-                        <td class="py-2.5 text-right font-mono" style="color:#475569;">{{ $c->order_count }}</td>
-                        <td class="py-2.5 text-right font-mono font-bold" style="color:#F5A623;">₱{{ number_format($c->spent) }}</td>
+                        <td class="px-3 py-2.5" style="color:#64748B;">{{ $c->province ?? '—' }}</td>
+                        <td class="px-3 py-2.5 text-right font-mono" style="color:#475569;">{{ $c->order_count }}</td>
+                        <td class="px-3 py-2.5 text-right font-mono font-bold" style="color:#F5A623;">₱{{ number_format($c->spent) }}</td>
                     </tr>
                     @endforeach
+                    @endif
                 </tbody>
             </table>
         </div>
-        @else
-        <div class="empty-state" style="min-height:180px;">
-            <div class="empty-state-icon">
-                <svg style="width:22px;height:22px;color:#94A3B8;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
-                </svg>
+
+        <div id="customers-empty-section" class="flex-1" @if($data && count((array)$data['topCustomers']) > 0) hidden @endif>
+            <div class="empty-state" style="min-height:180px;">
+                <div class="empty-state-icon">
+                    <svg style="width:22px;height:22px;color:#94A3B8;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    </svg>
+                </div>
+                <p class="title">No customers found</p>
+                <p class="hint">No orders found for this product yet.</p>
             </div>
-            <p class="title">No customers found</p>
-            <p class="hint">No orders found for this product yet.</p>
         </div>
-        @endif
     </div>
 
 </div>
 
-@endif
+</div>{{-- /content-data --}}
+
 @endsection
 
 @push('scripts')
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
-@if($data)
 const GOLD   = '#F5A623';
 const BLUE   = '#1E40AF';
 const LBLUE  = '#3B82F6';
@@ -443,16 +477,30 @@ const gridColor = '#F1F5F9';
 const tickFont  = { size: 11, family: "'Fira Code', monospace" };
 const tickColor = '#64748B';
 
+window.__charts = window.__charts || {};
+
 function revealChart(canvasId, skeletonId) {
-    const canvas = document.getElementById(canvasId);
-    const sk     = document.getElementById(skeletonId);
+    var canvas = document.getElementById(canvasId);
+    var sk     = document.getElementById(skeletonId);
     if (canvas) canvas.classList.add('loaded');
     if (sk) sk.style.display = 'none';
 }
 
+function showSection(chartId, emptyId, hasData) {
+    var chartEl = document.getElementById(chartId);
+    var emptyEl = document.getElementById(emptyId);
+    if (chartEl) chartEl.hidden = !hasData;
+    if (emptyEl) emptyEl.hidden = !!hasData;
+}
+
+function escHtml(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+@if($data)
 // Age Groups
 @if(array_sum($data['ageGroups']['data']) > 0)
-new Chart(document.getElementById('ageChart'), {
+window.__charts.age = new Chart(document.getElementById('ageChart'), {
     type: 'bar',
     data: {
         labels: @json($data['ageGroups']['labels']),
@@ -472,7 +520,7 @@ revealChart('ageChart', 'sk-age');
 
 // Gender
 @if(array_sum($data['gender']['data']) > 0)
-new Chart(document.getElementById('genderChart'), {
+window.__charts.gender = new Chart(document.getElementById('genderChart'), {
     type: 'doughnut',
     data: {
         labels: @json($data['gender']['labels']),
@@ -485,7 +533,7 @@ revealChart('genderChart', 'sk-gender');
 
 // Health Conditions
 @if(count($data['healthConditions']['labels']) > 0)
-new Chart(document.getElementById('healthChart'), {
+window.__charts.health = new Chart(document.getElementById('healthChart'), {
     type: 'bar',
     data: {
         labels: @json($data['healthConditions']['labels']),
@@ -505,7 +553,7 @@ revealChart('healthChart', 'sk-health');
 
 // Provinces
 @if(count($data['provinces']['labels']) > 0)
-new Chart(document.getElementById('provincesChart'), {
+window.__charts.provinces = new Chart(document.getElementById('provincesChart'), {
     type: 'bar',
     data: {
         labels: @json($data['provinces']['labels']),
@@ -526,20 +574,217 @@ revealChart('provincesChart', 'sk-prov');
 // New vs Returning
 @php $nvr = $data['newVsReturning']; @endphp
 @if($nvr['new'] + $nvr['returning'] > 0)
-new Chart(document.getElementById('nvrChart'), {
+window.__charts.nvr = new Chart(document.getElementById('nvrChart'), {
     type: 'doughnut',
     data: {
         labels: ['First-time', 'Repeat buyers'],
         datasets: [{ data: [{{ $nvr['new'] }}, {{ $nvr['returning'] }}], backgroundColor: [GOLD, BLUE], borderWidth: 0, hoverOffset: 5 }]
     },
     options: {
-        cutout: '60%',
-        plugins: { legend: { display: true, position: 'bottom', labels: { font: { size: 11, family: "'Fira Sans', sans-serif" }, color: tickColor, boxWidth: 10, padding: 14 } }, tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw.toLocaleString()}` } } }
+        cutout: '65%',
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw.toLocaleString()}` } } }
     }
 });
 revealChart('nvrChart', 'sk-nvr');
 @endif
 
 @endif
+
+window.__ajaxFilterUpdate = async function (form, params, url) {
+    var noProductEl = document.getElementById('content-no-product');
+    var dataEl      = document.getElementById('content-data');
+
+    // If currently on the "no product" screen, selecting a product needs a full render
+    if (noProductEl && !noProductEl.hidden) {
+        window.location.href = url;
+        return;
+    }
+
+    var res  = await fetch(url, { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
+    var json = await res.json();
+    var d    = json.data;
+
+    if (!d) {
+        if (noProductEl) noProductEl.hidden = false;
+        if (dataEl)      dataEl.hidden = true;
+        return;
+    }
+
+    if (noProductEl) noProductEl.hidden = true;
+    if (dataEl)      dataEl.hidden = false;
+
+    // KPIs
+    var kpiValues = [
+        Number(d.kpis.total_orders).toLocaleString(),
+        d.kpis.avg_age ? d.kpis.avg_age + ' yrs' : '—',
+        d.kpis.deliver_rate + '%',
+        d.kpis.rts_rate + '%',
+        Number(d.kpis.total_bottles).toLocaleString(),
+    ];
+    document.querySelectorAll('[data-kpi]').forEach(function (el) {
+        var idx = parseInt(el.getAttribute('data-kpi'));
+        if (kpiValues[idx] !== undefined) el.textContent = kpiValues[idx];
+    });
+
+    // Age chart
+    var hasAge = d.ageGroups.data.reduce(function (a, b) { return a + b; }, 0) > 0;
+    showSection('age-chart-section', 'age-empty-section', hasAge);
+    if (hasAge) {
+        if (window.__charts.age) {
+            window.__charts.age.data.labels = d.ageGroups.labels;
+            window.__charts.age.data.datasets[0].data = d.ageGroups.data;
+            window.__charts.age.update();
+        } else {
+            window.__charts.age = new Chart(document.getElementById('ageChart'), {
+                type: 'bar',
+                data: { labels: d.ageGroups.labels, datasets: [{ data: d.ageGroups.data, backgroundColor: GOLD, borderRadius: 6, borderSkipped: false }] },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (ctx) { return ' ' + ctx.raw.toLocaleString() + ' customers'; } } } },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { font: tickFont, color: tickColor } },
+                        y: { grid: { color: gridColor }, ticks: { font: tickFont, color: tickColor }, beginAtZero: true }
+                    }
+                }
+            });
+            revealChart('ageChart', 'sk-age');
+        }
+    } else {
+        if (window.__charts.age) { window.__charts.age.destroy(); window.__charts.age = null; }
+    }
+
+    // Gender chart
+    var hasGender = d.gender.data.reduce(function (a, b) { return a + b; }, 0) > 0;
+    showSection('gender-chart-section', 'gender-empty-section', hasGender);
+    if (hasGender) {
+        if (window.__charts.gender) {
+            window.__charts.gender.data.labels = d.gender.labels;
+            window.__charts.gender.data.datasets[0].data = d.gender.data;
+            window.__charts.gender.update();
+        } else {
+            window.__charts.gender = new Chart(document.getElementById('genderChart'), {
+                type: 'doughnut',
+                data: { labels: d.gender.labels, datasets: [{ data: d.gender.data, backgroundColor: [GOLD, DARK, SLATE], borderWidth: 0, hoverOffset: 5 }] },
+                options: { cutout: '65%', plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (ctx) { return ' ' + ctx.label + ': ' + ctx.raw.toLocaleString(); } } } } }
+            });
+            revealChart('genderChart', 'sk-gender');
+        }
+        var gColors   = ['#F5A623', '#0F172A', '#94A3B8'];
+        var legendEl  = document.getElementById('gender-legend');
+        if (legendEl) {
+            legendEl.innerHTML = d.gender.labels.map(function (label, i) {
+                return '<div class="flex items-center gap-1.5">'
+                    + '<span class="w-2.5 h-2.5 rounded-full" style="background:' + gColors[i % 3] + ';"></span>'
+                    + '<span class="text-xs" style="color:#475569;">' + escHtml(label) + ' (' + Number(d.gender.data[i]).toLocaleString() + ')</span>'
+                    + '</div>';
+            }).join('');
+        }
+    } else {
+        if (window.__charts.gender) { window.__charts.gender.destroy(); window.__charts.gender = null; }
+    }
+
+    // Health chart
+    var hasHealth = d.healthConditions.labels.length > 0;
+    showSection('health-chart-section', 'health-empty-section', hasHealth);
+    if (hasHealth) {
+        if (window.__charts.health) {
+            window.__charts.health.data.labels = d.healthConditions.labels;
+            window.__charts.health.data.datasets[0].data = d.healthConditions.data;
+            window.__charts.health.update();
+        } else {
+            window.__charts.health = new Chart(document.getElementById('healthChart'), {
+                type: 'bar',
+                data: { labels: d.healthConditions.labels, datasets: [{ data: d.healthConditions.data, backgroundColor: DARK, borderRadius: 4, borderSkipped: false }] },
+                options: {
+                    indexAxis: 'y', responsive: true,
+                    plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (ctx) { return ' ' + ctx.raw.toLocaleString() + ' orders'; } } } },
+                    scales: {
+                        x: { grid: { color: gridColor }, ticks: { font: tickFont, color: tickColor }, beginAtZero: true },
+                        y: { grid: { display: false }, ticks: { font: { size: 11, family: "'Fira Sans', sans-serif" }, color: '#374151' } }
+                    }
+                }
+            });
+            revealChart('healthChart', 'sk-health');
+        }
+    } else {
+        if (window.__charts.health) { window.__charts.health.destroy(); window.__charts.health = null; }
+    }
+
+    // Provinces chart
+    var hasProv = d.provinces.labels.length > 0;
+    showSection('prov-chart-section', 'prov-empty-section', hasProv);
+    if (hasProv) {
+        if (window.__charts.provinces) {
+            window.__charts.provinces.data.labels = d.provinces.labels;
+            window.__charts.provinces.data.datasets[0].data = d.provinces.data;
+            window.__charts.provinces.update();
+        } else {
+            window.__charts.provinces = new Chart(document.getElementById('provincesChart'), {
+                type: 'bar',
+                data: { labels: d.provinces.labels, datasets: [{ data: d.provinces.data, backgroundColor: GOLD, borderRadius: 4, borderSkipped: false }] },
+                options: {
+                    indexAxis: 'y', responsive: true,
+                    plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (ctx) { return ' ' + ctx.raw.toLocaleString() + ' orders'; } } } },
+                    scales: {
+                        x: { grid: { color: gridColor }, ticks: { font: tickFont, color: tickColor }, beginAtZero: true },
+                        y: { grid: { display: false }, ticks: { font: { size: 10, family: "'Fira Sans', sans-serif" }, color: '#374151' } }
+                    }
+                }
+            });
+            revealChart('provincesChart', 'sk-prov');
+        }
+    } else {
+        if (window.__charts.provinces) { window.__charts.provinces.destroy(); window.__charts.provinces = null; }
+    }
+
+    // NVR chart + stat boxes
+    var hasNvr = (d.newVsReturning.new + d.newVsReturning.returning) > 0;
+    showSection('nvr-chart-section', 'nvr-empty-section', hasNvr);
+    if (hasNvr) {
+        if (window.__charts.nvr) {
+            window.__charts.nvr.data.datasets[0].data = [d.newVsReturning.new, d.newVsReturning.returning];
+            window.__charts.nvr.update();
+        } else {
+            window.__charts.nvr = new Chart(document.getElementById('nvrChart'), {
+                type: 'doughnut',
+                data: { labels: ['First-time', 'Repeat buyers'], datasets: [{ data: [d.newVsReturning.new, d.newVsReturning.returning], backgroundColor: [GOLD, BLUE], borderWidth: 0, hoverOffset: 5 }] },
+                options: {
+                    cutout: '65%',
+                    plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (ctx) { return ' ' + ctx.label + ': ' + ctx.raw.toLocaleString(); } } } }
+                }
+            });
+            revealChart('nvrChart', 'sk-nvr');
+        }
+        var nvrTot = d.newVsReturning.new + d.newVsReturning.returning;
+        var nEl  = document.getElementById('nvr-stat-new');
+        var rEl  = document.getElementById('nvr-stat-returning');
+        var npEl = document.getElementById('nvr-stat-new-pct');
+        var rpEl = document.getElementById('nvr-stat-ret-pct');
+        if (nEl)  nEl.textContent  = Number(d.newVsReturning.new).toLocaleString();
+        if (rEl)  rEl.textContent  = Number(d.newVsReturning.returning).toLocaleString();
+        if (npEl) npEl.textContent = (nvrTot > 0 ? Math.round(d.newVsReturning.new / nvrTot * 100) : 0) + '% of buyers';
+        if (rpEl) rpEl.textContent = (nvrTot > 0 ? Math.round(d.newVsReturning.returning / nvrTot * 100) : 0) + '% of buyers';
+    } else {
+        if (window.__charts.nvr) { window.__charts.nvr.destroy(); window.__charts.nvr = null; }
+    }
+
+    // Top customers table
+    var hasCustomers = d.topCustomers && d.topCustomers.length > 0;
+    showSection('customers-table-section', 'customers-empty-section', hasCustomers);
+    if (hasCustomers) {
+        var tbody = document.getElementById('tbody-audience-customers');
+        if (tbody) {
+            tbody.innerHTML = d.topCustomers.map(function (c, i) {
+                return '<tr style="border-top:1px solid #F8FAFC; transition:background 0.12s;" onmouseover="this.style.background=\'#F0F7FF\'" onmouseout="this.style.background=\'\'">'
+                    + '<td class="px-3 py-2.5"><div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold font-mono" style="background:' + (i < 3 ? 'rgba(245,166,35,0.12)' : '#F1F5F9') + '; color:' + (i < 3 ? '#D97706' : '#64748B') + ';">' + (i + 1) + '</div></td>'
+                    + '<td class="px-3 py-2.5"><p class="font-semibold" style="color:#1E293B;">' + escHtml(c.name || '—') + '</p><p style="color:#94A3B8;">' + escHtml(c.gender || '') + '</p></td>'
+                    + '<td class="px-3 py-2.5" style="color:#64748B;">' + escHtml(c.province || '—') + '</td>'
+                    + '<td class="px-3 py-2.5 text-right font-mono" style="color:#475569;">' + Number(c.order_count).toLocaleString() + '</td>'
+                    + '<td class="px-3 py-2.5 text-right font-mono font-bold" style="color:#F5A623;">₱' + Number(c.spent).toLocaleString() + '</td>'
+                    + '</tr>';
+            }).join('');
+        }
+    }
+};
 </script>
 @endpush

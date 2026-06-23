@@ -294,6 +294,17 @@ function handlePreset(sel) {
 
     if (sel.value === 'custom') {
         customRange.classList.remove('hidden');
+        // Pre-fill visible date pickers from the hidden inputs; if those are also
+        // empty (e.g. user was on "All Time"), default to the last 30 days.
+        const [visFrom, visTo] = customRange.querySelectorAll('input[type=date]');
+        if (visFrom && !visFrom.value) {
+            visFrom.value    = fromInput.value || ago(30);
+            fromInput.value  = visFrom.value;
+        }
+        if (visTo && !visTo.value) {
+            visTo.value    = toInput.value || today;
+            toInput.value  = visTo.value;
+        }
         return;
     }
     customRange.classList.add('hidden');

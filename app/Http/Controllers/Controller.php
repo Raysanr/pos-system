@@ -99,7 +99,9 @@ abstract class Controller
             $params[]     = $to   . ' 23:59:59';
         }
         if ($pf) {
-            $whereParts[] = "EXISTS (SELECT 1 FROM json_each(o.items) AS pf_check WHERE json_extract(pf_check.value, '$.variation_info.name') = ? COLLATE NOCASE)";
+            // When a product filter is active, restrict the item-level count to that product
+            // so mixed-product orders don't inflate the bottle count with other SKUs.
+            $whereParts[] = "json_extract(item.value, '$.variation_info.name') = ? COLLATE NOCASE";
             $params[]     = $pf;
         }
         foreach ($extraClauses as $clause) {

@@ -95,10 +95,10 @@ let markers   = [];
 let map;
 let isLoading = false;
 
-const DATE_FROM       = (document.querySelector('[name=date_from]')      || {}).value || '';
-const DATE_TO         = (document.querySelector('[name=date_to]')        || {}).value || '';
-const STATUS          = (document.querySelector('[name=status]')         || {}).value || 'all';
-const PRODUCT_FILTER  = (document.querySelector('[name=product_filter]') || {}).value || '';
+let DATE_FROM       = (document.querySelector('[name=date_from]')      || {}).value || '';
+let DATE_TO         = (document.querySelector('[name=date_to]')        || {}).value || '';
+let STATUS          = (document.querySelector('[name=status]')         || {}).value || 'all';
+let PRODUCT_FILTER  = (document.querySelector('[name=product_filter]') || {}).value || '';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function getCoords(d) {
@@ -341,5 +341,16 @@ if (currentData.length > 0) {
     updateLevelUI();
     fitToData();
 }
+
+window.__ajaxFilterUpdate = async function (form, params) {
+    DATE_FROM      = params.get('date_from')      || '';
+    DATE_TO        = params.get('date_to')        || '';
+    STATUS         = params.get('status')         || 'all';
+    PRODUCT_FILTER = params.get('product_filter') || '';
+    currentLevel          = 'province';
+    currentProvinceFilter = null;
+    currentCityFilter     = null;
+    await loadData();
+};
 </script>
 @endpush

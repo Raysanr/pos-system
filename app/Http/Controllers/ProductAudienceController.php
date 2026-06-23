@@ -21,7 +21,7 @@ class ProductAudienceController extends Controller
         $data = null;
         if ($selectedProduct) {
             $cacheKey = 'product_audience_' . $shop->id . '_' . $this->shopCacheBust($shop->id) . '_' . md5($selectedProduct) . "_{$dateFrom}_{$dateTo}";
-            $data = Cache::remember($cacheKey, 300, function () use ($shop, $selectedProduct, $dateFrom, $dateTo) {
+            $data = Cache::remember($cacheKey, 1800, function () use ($shop, $selectedProduct, $dateFrom, $dateTo) {
                 return [
                     'kpis'             => $this->kpis($shop->id, $selectedProduct, $dateFrom, $dateTo),
                     'ageGroups'        => $this->ageGroups($shop->id, $selectedProduct, $dateFrom, $dateTo),
@@ -32,6 +32,13 @@ class ProductAudienceController extends Controller
                     'topCustomers'     => $this->topCustomers($shop->id, $selectedProduct, $dateFrom, $dateTo),
                 ];
             });
+        }
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'data'            => $data,
+                'selectedProduct' => $selectedProduct,
+            ]);
         }
 
         return view('analytics.product-audience', compact(
@@ -186,7 +193,7 @@ class ProductAudienceController extends Controller
 
     private function newVsReturning(int $shopId, string $product, ?string $from, ?string $to): array
     {
-        $q = DB::table('orders')
+        $sub = DB::table('orders')
             ->where('shop_id', $shopId)
             ->whereNotNull('customer_pancake_id')
             ->whereRaw(
@@ -194,16 +201,20 @@ class ProductAudienceController extends Controller
                 [$product]
             );
 
-        if ($from) $q->where('ordered_at', '>=', $from . ' 00:00:00');
-        if ($to)   $q->where('ordered_at', '<=', $to   . ' 23:59:59');
+        if ($from) $sub->where('ordered_at', '>=', $from . ' 00:00:00');
+        if ($to)   $sub->where('ordered_at', '<=', $to   . ' 23:59:59');
 
-        $counts = $q->select('customer_pancake_id', DB::raw('COUNT(*) as cnt'))
-            ->groupBy('customer_pancake_id')
-            ->get();
+        $sub->select('customer_pancake_id', DB::raw('COUNT(*) as cnt'))
+            ->groupBy('customer_pancake_id');
+
+        $row = DB::table($sub, 'sub')->selectRaw(
+            'SUM(CASE WHEN cnt = 1 THEN 1 ELSE 0 END) as new_count, ' .
+            'SUM(CASE WHEN cnt > 1 THEN 1 ELSE 0 END) as ret_count'
+        )->first();
 
         return [
-            'new'       => $counts->where('cnt', 1)->count(),
-            'returning' => $counts->where('cnt', '>', 1)->count(),
+            'new'       => (int) ($row->new_count ?? 0),
+            'returning' => (int) ($row->ret_count ?? 0),
         ];
     }
 

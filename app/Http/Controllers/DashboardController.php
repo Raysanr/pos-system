@@ -27,7 +27,7 @@ class DashboardController extends Controller
         $datePreset    = $this->detectDatePreset($dateFrom, $dateTo);
 
         $cacheKey = "dashboard_{$shop->id}_{$this->shopCacheBust($shop->id)}_{$dateFrom}_{$dateTo}_{$productFilter}";
-        $cached = Cache::remember($cacheKey, 300, function () use ($shop, $dateFrom, $dateTo, $productFilter) {
+        $cached = Cache::remember($cacheKey, 1800, function () use ($shop, $dateFrom, $dateTo, $productFilter) {
             return [
                 'kpis'             => $this->getKpis($shop->id, $dateFrom, $dateTo, $productFilter),
                 'revenueChart'     => $this->getRevenueChart($shop->id, $dateFrom, $dateTo, $productFilter),
@@ -42,6 +42,16 @@ class DashboardController extends Controller
         $orderStatusChart = $cached['orderStatusChart'];
         $topProvinces     = $cached['topProvinces'];
         $topCouriers      = $cached['topCouriers'];
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'kpis'             => $kpis,
+                'revenueChart'     => $revenueChart,
+                'orderStatusChart' => $orderStatusChart,
+                'topProvinces'     => $topProvinces,
+                'topCouriers'      => $topCouriers,
+            ]);
+        }
 
         return view('dashboard', compact(
             'shop', 'kpis', 'revenueChart', 'orderStatusChart',

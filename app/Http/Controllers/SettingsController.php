@@ -64,8 +64,11 @@ class SettingsController extends Controller
         if (!$fullSync) {
             $shop = \App\Models\PancakeShop::find($shopId);
             if ($shop?->last_synced_at) {
-                // Subtract 2 hours to catch any orders at the boundary
-                $fromDate = $shop->last_synced_at->subHours(2)->format('Y-m-d H:i:s');
+                // Look back 7 days so orders whose status changed (e.g. shipped→delivered) get re-fetched
+                $fromDate = $shop->last_synced_at->copy()->subDays(7)->format('Y-m-d H:i:s');
+            } else {
+                // last_synced_at was never set — avoid a full sync that times out; fetch last 30 days only
+                $fromDate = now()->subDays(30)->format('Y-m-d H:i:s');
             }
         }
 

@@ -18,23 +18,23 @@
 <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
     <div class="bg-white rounded-xl border border-red-100 p-4 shadow-sm">
         <p class="text-xs font-semibold text-red-500 uppercase tracking-wider mb-2">RTS Count</p>
-        <p class="text-xl font-bold text-red-700 font-mono">{{ number_format($rtsKpis['rts_count']) }}</p>
+        <p id="kpi-rts-count" class="text-xl font-bold text-red-700 font-mono">{{ number_format($rtsKpis['rts_count']) }}</p>
     </div>
     <div class="bg-white rounded-xl border border-red-100 p-4 shadow-sm">
         <p class="text-xs font-semibold text-red-500 uppercase tracking-wider mb-2">RTS Rate</p>
-        <p class="text-xl font-bold text-red-700 font-mono">{{ $rtsKpis['rts_rate'] }}%</p>
+        <p id="kpi-rts-rate" class="text-xl font-bold text-red-700 font-mono">{{ $rtsKpis['rts_rate'] }}%</p>
     </div>
     <div class="bg-white rounded-xl border border-amber-100 p-4 shadow-sm">
         <p class="text-xs font-semibold text-amber-600 uppercase tracking-wider mb-2">Returned</p>
-        <p class="text-xl font-bold text-amber-700 font-mono">{{ number_format($rtsKpis['returned']) }}</p>
+        <p id="kpi-returned" class="text-xl font-bold text-amber-700 font-mono">{{ number_format($rtsKpis['returned']) }}</p>
     </div>
     <div class="bg-white rounded-xl border border-slate-100 p-4 shadow-sm">
         <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Revenue Lost</p>
-        <p class="text-xl font-bold text-slate-900 font-mono">₱{{ number_format($rtsKpis['revenue_lost']) }}</p>
+        <p id="kpi-revenue-lost" class="text-xl font-bold text-slate-900 font-mono">₱{{ number_format($rtsKpis['revenue_lost']) }}</p>
     </div>
     <div class="bg-white rounded-xl border border-red-100 p-4 shadow-sm">
         <p class="text-xs font-semibold uppercase tracking-wider mb-2" style="color:#EF4444;">Bottles Lost</p>
-        <p class="text-xl font-bold font-mono" style="color:#EF4444;">{{ number_format($rtsKpis['bottles_lost']) }}</p>
+        <p id="kpi-bottles-lost" class="text-xl font-bold font-mono" style="color:#EF4444;">{{ number_format($rtsKpis['bottles_lost']) }}</p>
         <p class="mt-1 text-xs text-slate-400">RTS bottles</p>
     </div>
 </div>
@@ -61,7 +61,7 @@
                     <th class="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase bg-slate-50">RTS</th>
                     <th class="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase bg-slate-50">Rate</th>
                 </tr></thead>
-                <tbody>
+                <tbody id="tbody-rts-province">
                     @forelse($rtsByProvince as $r)
                     <tr class="border-t border-slate-100 hover:bg-red-50/30">
                         <td class="px-4 py-3 text-sm text-slate-700">{{ $r['province'] }}</td>
@@ -91,7 +91,7 @@
                 <th class="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase bg-slate-50">RTS</th>
                 <th class="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase bg-slate-50">Rate</th>
             </tr></thead>
-            <tbody>
+            <tbody id="tbody-rts-courier">
                 @forelse($rtsByCourier as $c)
                 <tr class="border-t border-slate-100 hover:bg-red-50/30">
                     <td class="px-4 py-3 text-sm font-medium text-slate-700">{{ $c['courier'] }}</td>
@@ -109,16 +109,17 @@
 
         <!-- Courier Bar Chart -->
         @if(count($rtsByCourier) > 0)
-        <div class="px-5 py-4 border-t border-slate-100">
+        <div id="courier-chart-section" class="px-5 py-4 border-t border-slate-100">
             <canvas id="courierChart" height="120"></canvas>
         </div>
+        @else
+        <div id="courier-chart-section" class="px-5 py-4 border-t border-slate-100" style="display:none"></div>
         @endif
     </div>
 </div>
 
 <!-- Return Reasons -->
-@if(count($returnReasons) > 0)
-<div class="bg-white rounded-xl border border-blue-100 shadow-sm overflow-hidden">
+<div id="return-reasons-section" class="bg-white rounded-xl border border-blue-100 shadow-sm overflow-hidden{{ count($returnReasons) > 0 ? '' : ' hidden' }}">
     <div class="px-5 py-4 border-b border-slate-100">
         <h3 class="text-sm font-semibold text-slate-800">Top Return Reasons</h3>
         <p class="text-xs text-slate-400">From Pancake return reason field</p>
@@ -128,7 +129,7 @@
             <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase bg-slate-50">Reason</th>
             <th class="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase bg-slate-50">Count</th>
         </tr></thead>
-        <tbody>
+        <tbody id="tbody-return-reasons">
             @foreach($returnReasons as $r)
             <tr class="border-t border-slate-100 hover:bg-slate-50">
                 <td class="px-4 py-3 text-sm text-slate-700">{{ $r['return_reason'] }}</td>
@@ -138,18 +139,19 @@
         </tbody>
     </table>
 </div>
-@endif
 @endsection
 
 @push('scripts')
-<script id="trend-data" type="application/json"><?php echo json_encode($rtsTrend); ?></script>
+<script id="trend-data"   type="application/json"><?php echo json_encode($rtsTrend); ?></script>
 <script id="courier-data" type="application/json"><?php echo json_encode($rtsByCourier); ?></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
-const trendData = JSON.parse(document.getElementById('trend-data').textContent);
+const trendData   = JSON.parse(document.getElementById('trend-data').textContent);
 const courierData = JSON.parse(document.getElementById('courier-data').textContent);
 
-new Chart(document.getElementById('rtsTrendChart'), {
+window.__charts = {};
+
+window.__charts.rtsTrend = new Chart(document.getElementById('rtsTrendChart'), {
     type: 'bar',
     data: {
         labels: trendData.labels,
@@ -170,13 +172,13 @@ new Chart(document.getElementById('rtsTrendChart'), {
 });
 
 @if(count($rtsByCourier) > 0)
-new Chart(document.getElementById('courierChart'), {
+window.__charts.courier = new Chart(document.getElementById('courierChart'), {
     type: 'bar',
     data: {
         labels: courierData.map(c => c.courier),
         datasets: [
             { label: 'Total', data: courierData.map(c => c.total), backgroundColor: 'rgba(30,64,175,0.7)', borderRadius: 3 },
-            { label: 'RTS', data: courierData.map(c => c.rts), backgroundColor: 'rgba(239,68,68,0.8)', borderRadius: 3 }
+            { label: 'RTS',   data: courierData.map(c => c.rts),   backgroundColor: 'rgba(239,68,68,0.8)',  borderRadius: 3 }
         ]
     },
     options: {
@@ -189,5 +191,97 @@ new Chart(document.getElementById('courierChart'), {
     }
 });
 @endif
+
+// ── AJAX filter update ────────────────────────────────────────────────────────
+function escHtml(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function rtsRateCls(rate) {
+    return rate > 25 ? 'bg-red-100 text-red-700' : rate > 15 ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700';
+}
+
+window.__ajaxFilterUpdate = async function (form, params, url) {
+    const res = await fetch(url, { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
+
+    // KPIs
+    document.getElementById('kpi-rts-count').textContent    = Number(d.rtsKpis.rts_count).toLocaleString();
+    document.getElementById('kpi-rts-rate').textContent     = d.rtsKpis.rts_rate + '%';
+    document.getElementById('kpi-returned').textContent     = Number(d.rtsKpis.returned).toLocaleString();
+    document.getElementById('kpi-revenue-lost').textContent = '₱' + Number(d.rtsKpis.revenue_lost).toLocaleString();
+    document.getElementById('kpi-bottles-lost').textContent = Number(d.rtsKpis.bottles_lost).toLocaleString();
+
+    // RTS Trend chart (dual dataset)
+    window.__charts.rtsTrend.data.labels = d.rtsTrend.labels;
+    window.__charts.rtsTrend.data.datasets[0].data = d.rtsTrend.total;
+    window.__charts.rtsTrend.data.datasets[1].data = d.rtsTrend.rts;
+    window.__charts.rtsTrend.update();
+
+    // Courier chart — create/update/hide based on whether data exists
+    const courierSection = document.getElementById('courier-chart-section');
+    if (d.rtsByCourier.length > 0) {
+        if (window.__charts.courier) {
+            window.__charts.courier.data.labels = d.rtsByCourier.map(c => c.courier);
+            window.__charts.courier.data.datasets[0].data = d.rtsByCourier.map(c => c.total);
+            window.__charts.courier.data.datasets[1].data = d.rtsByCourier.map(c => c.rts);
+            window.__charts.courier.update();
+        } else {
+            courierSection.style.display = '';
+            courierSection.innerHTML = '<canvas id="courierChart" height="120"></canvas>';
+            window.__charts.courier = new Chart(document.getElementById('courierChart'), {
+                type: 'bar',
+                data: {
+                    labels: d.rtsByCourier.map(c => c.courier),
+                    datasets: [
+                        { label: 'Total', data: d.rtsByCourier.map(c => c.total), backgroundColor: 'rgba(30,64,175,0.7)', borderRadius: 3 },
+                        { label: 'RTS',   data: d.rtsByCourier.map(c => c.rts),   backgroundColor: 'rgba(239,68,68,0.8)',  borderRadius: 3 }
+                    ]
+                },
+                options: { responsive: true, plugins: { legend: { position: 'top', labels: { font: { size: 10 }, boxWidth: 10 } } }, scales: { x: { grid: { display: false }, ticks: { font: { size: 10 } } }, y: { grid: { color: '#f1f5f9' }, ticks: { font: { size: 10 } } } } }
+            });
+        }
+    } else if (courierSection) {
+        courierSection.style.display = 'none';
+        if (window.__charts.courier) { window.__charts.courier.destroy(); window.__charts.courier = null; }
+    }
+
+    // Province table
+    document.getElementById('tbody-rts-province').innerHTML = d.rtsByProvince.length
+        ? d.rtsByProvince.map(r => `
+            <tr class="border-t border-slate-100 hover:bg-red-50/30">
+                <td class="px-4 py-3 text-sm text-slate-700">${escHtml(r.province)}</td>
+                <td class="px-4 py-3 text-sm text-slate-700 text-right font-mono">${Number(r.total).toLocaleString()}</td>
+                <td class="px-4 py-3 text-sm text-red-600 text-right font-mono">${Number(r.rts).toLocaleString()}</td>
+                <td class="px-4 py-3 text-right"><span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${rtsRateCls(r.rts_rate)}">${r.rts_rate}%</span></td>
+            </tr>`).join('')
+        : `<tr><td colspan="4" class="px-4 py-8 text-center text-sm text-slate-400">No data yet.</td></tr>`;
+
+    // Courier table
+    document.getElementById('tbody-rts-courier').innerHTML = d.rtsByCourier.length
+        ? d.rtsByCourier.map(c => `
+            <tr class="border-t border-slate-100 hover:bg-red-50/30">
+                <td class="px-4 py-3 text-sm font-medium text-slate-700">${escHtml(c.courier)}</td>
+                <td class="px-4 py-3 text-sm text-slate-700 text-right font-mono">${Number(c.total).toLocaleString()}</td>
+                <td class="px-4 py-3 text-sm text-red-600 text-right font-mono">${Number(c.rts).toLocaleString()}</td>
+                <td class="px-4 py-3 text-right"><span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${rtsRateCls(c.rts_rate)}">${c.rts_rate}%</span></td>
+            </tr>`).join('')
+        : `<tr><td colspan="4" class="px-4 py-8 text-center text-sm text-slate-400">No data yet.</td></tr>`;
+
+    // Return reasons section
+    const reasonsEl = document.getElementById('return-reasons-section');
+    const reasonsTbody = document.getElementById('tbody-return-reasons');
+    if (d.returnReasons.length > 0) {
+        reasonsTbody.innerHTML = d.returnReasons.map(r => `
+            <tr class="border-t border-slate-100 hover:bg-slate-50">
+                <td class="px-4 py-3 text-sm text-slate-700">${escHtml(r.return_reason)}</td>
+                <td class="px-4 py-3 text-sm font-semibold text-red-600 text-right font-mono">${r.count}</td>
+            </tr>`).join('');
+        reasonsEl.classList.remove('hidden');
+    } else {
+        reasonsEl.classList.add('hidden');
+    }
+};
 </script>
 @endpush

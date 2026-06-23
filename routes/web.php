@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AnalyticsPulseController;
 use App\Http\Controllers\CustomerAnalyticsController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\MapAnalyticsController;
@@ -24,6 +25,7 @@ Route::prefix('analytics')->name('analytics.')->group(function () {
     Route::get('/rts',              [RtsAnalyticsController::class,       'index'])->name('rts');
     Route::get('/map',              [MapAnalyticsController::class,       'index'])->name('map');
     Route::get('/map/data',         [MapAnalyticsController::class,       'index'])->name('map.data');
+    Route::get('/pulse',            [AnalyticsPulseController::class,     'pulse'])->name('pulse');
 });
 
 Route::prefix('settings')->name('settings.')->group(function () {
