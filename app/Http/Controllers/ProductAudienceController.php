@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Support\DemographicsExtractor;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class ProductAudienceController extends Controller
 {
@@ -145,14 +147,12 @@ class ProductAudienceController extends Controller
 
     private function healthConditions(int $shopId, string $product, ?string $from, ?string $to): array
     {
-        // health_condition is stored as a JSON array e.g. ["Cataract","Teary Eyes"].
-        // json_each() expands each element so one order can contribute multiple conditions.
-        // LIKE '[%' guards against any legacy plain-string rows from before the JSON migration.
         $bindings = [$shopId, $product];
         $dateWhere = '';
         if ($from) { $dateWhere .= " AND o.ordered_at >= ?"; $bindings[] = $from . ' 00:00:00'; }
         if ($to)   { $dateWhere .= " AND o.ordered_at <= ?"; $bindings[] = $to   . ' 23:59:59'; }
 
+        // Path 1: use pre-computed health_condition JSON arrays (fast)
         $rows = DB::select("
             SELECT je.value AS condition, COUNT(*) AS cnt
             FROM orders o, json_each(o.health_condition) AS je
@@ -165,13 +165,51 @@ class ProductAudienceController extends Controller
               )
               {$dateWhere}
             GROUP BY je.value
-            ORDER BY cnt DESC
-            LIMIT 12
         ", $bindings);
 
+        $counts = [];
+        foreach ($rows as $r) {
+            $counts[$r->condition] = (int) $r->cnt;
+        }
+
+        // Path 2: orders with extra_note but no pre-computed health_condition — extract on-the-fly.
+        // Transitional: covers orders synced before DemographicsExtractor was wired into SyncOrdersJob.
+        // Once app:extract-order-demographics has been run to backfill all historical rows, this path
+        // will silently no-op and can be removed.
+        $q = DB::table('orders as o')
+            ->where('o.shop_id', $shopId)
+            ->whereNotNull('o.extra_note')
+            ->where(function ($q) {
+                $q->whereNull('o.health_condition')
+                  ->orWhereRaw("o.health_condition NOT LIKE '[%'");
+            })
+            ->whereRaw(
+                "EXISTS (SELECT 1 FROM json_each(o.items) AS item WHERE json_extract(item.value, '$.variation_info.name') = ? COLLATE NOCASE)",
+                [$product]
+            );
+        if ($from) $q->where('o.ordered_at', '>=', $from . ' 00:00:00');
+        if ($to)   $q->where('o.ordered_at', '<=', $to   . ' 23:59:59');
+
+        $scanned = 0;
+        $q->select('o.id', 'o.extra_note')->orderBy('o.id')->chunk(500, function ($orders) use (&$counts, &$scanned) {
+            foreach ($orders as $order) {
+                foreach (DemographicsExtractor::conditions($order->extra_note) as $cond) {
+                    $counts[$cond] = ($counts[$cond] ?? 0) + 1;
+                }
+            }
+            $scanned += $orders->count();
+            if ($scanned >= 5000) {
+                Log::warning("ProductAudienceController: healthConditions fallback scan capped at {$scanned} rows; run app:extract-order-demographics to backfill.");
+                return false;
+            }
+        });
+
+        arsort($counts);
+        $top = array_slice($counts, 0, 12, true);
+
         return [
-            'labels' => array_column($rows, 'condition'),
-            'data'   => array_map('intval', array_column($rows, 'cnt')),
+            'labels' => array_keys($top),
+            'data'   => array_values($top),
         ];
     }
 
