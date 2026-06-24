@@ -37,7 +37,8 @@ class GeocodeOverpass extends Command
         $bar->start();
 
         foreach ($rows as $row) {
-            $key = LocationGeoCache::makeKey($row->name, $level, $row->province);
+            $city = ($level === 'barangay') ? ($row->city ?? null) : null;
+            $key  = LocationGeoCache::makeKey($row->name, $level, $row->province, $city);
 
             if (!$this->option('force') && LocationGeoCache::where('name_key', $key)->exists()) {
                 $skipped++;
@@ -163,9 +164,10 @@ class GeocodeOverpass extends Command
                  ORDER BY province'
             ),
             'barangay' => DB::select(
-                'SELECT DISTINCT ward as name, province, MAX(district) as city
+                'SELECT ward as name, province, district as city
                  FROM orders WHERE ward IS NOT NULL AND ward != "" AND province IS NOT NULL
-                 GROUP BY ward, province ORDER BY province, ward'
+                   AND district IS NOT NULL AND district != ""
+                 GROUP BY ward, province, district ORDER BY province, district, ward'
             ),
             default => DB::select(
                 'SELECT DISTINCT district as name, MAX(province) as province, NULL as city
@@ -193,7 +195,7 @@ class GeocodeOverpass extends Command
             }
             // Also try without " city" suffix (e.g. "angeles city" → "angeles")
             $candidates = $osmIndex[$rawName]
-                       ?? $osmIndex[preg_replace('/\s+city$/', '', $rawName)]
+                       ?? $osmIndex[LocationGeoCache::stripCitySuffix($rawName)]
                        ?? [];
         } else {
             // Barangay: strip parentheticals like "(pob.)" and try plain name
@@ -202,48 +204,65 @@ class GeocodeOverpass extends Command
         }
 
         if (empty($candidates)) return null;
-        if (count($candidates) === 1) {
-            $c = $candidates[0];
-            return $this->isWithinPhilippines($c['lat'], $c['lng']) ? [$c['lat'], $c['lng']] : null;
-        }
 
-        // Ambiguous — for barangays, prefer city center (tighter radius); fall back to province.
-        $ambig++;
-
+        // Build anchor first — needed for single-candidate barangay validation too.
         $anchor  = null;
         $maxDist = 3.0;
 
         if ($level === 'barangay' && !empty($row->city)) {
-            $cityNorm    = LocationGeoCache::normalize($row->city);
-            $cityNoSufx  = preg_replace('/\s+city$/', '', $cityNorm);
-            $anchor      = LocationGeoCache::whereIn('name_key', [
-                'city:' . $cityNorm,
-                'city:' . $cityNoSufx,
-            ])->first();
-            if ($anchor) $maxDist = 1.0; // ~110 km — tight enough for city-level disambiguation
+            $cityNorm2   = LocationGeoCache::normalize($row->city);
+            $cityNoSufx2 = LocationGeoCache::stripCitySuffix($cityNorm2);
+            $provNorm2   = LocationGeoCache::normalize($row->province ?? '');
+            $anchor      = LocationGeoCache::whereIn('name_key', array_filter([
+                'city:' . $cityNorm2 . ($provNorm2 ? ':' . $provNorm2 : ''),
+                'city:' . $cityNoSufx2 . ($provNorm2 ? ':' . $provNorm2 : ''),
+                'city:' . $cityNorm2,
+                'city:' . $cityNoSufx2,
+            ]))->first();
+            if ($anchor) $maxDist = 1.0;
         }
-
         if (!$anchor) {
             $provKey = LocationGeoCache::makeKey($row->province ?? '', 'province');
             $anchor  = LocationGeoCache::where('name_key', $provKey)->first();
         }
+
+        if (count($candidates) === 1) {
+            $c = $candidates[0];
+            if (!$this->isWithinPhilippines($c['lat'], $c['lng'])) return null;
+            // For barangays with a city anchor, apply a tighter 0.3° radius (~33 km) on the
+            // single-candidate path to reject same-named barangays from neighbouring municipalities.
+            // (The multi-candidate path uses 1.0° because it must choose the closest of several hits.)
+            if ($level === 'barangay' && $anchor) {
+                if ($this->manhattanDist($c['lat'], $c['lng'], $anchor->lat, $anchor->lng) > 0.3) return null;
+            }
+            return [$c['lat'], $c['lng']];
+        }
+
+        // Ambiguous (multiple candidates) — pick closest to anchor.
+        $ambig++;
 
         if (!$anchor) return [$candidates[0]['lat'], $candidates[0]['lng']];
 
         $closest = null;
         $minDist = PHP_INT_MAX;
         foreach ($candidates as $c) {
-            $dist = abs($c['lat'] - $anchor->lat) + abs($c['lng'] - $anchor->lng);
+            $dist = $this->manhattanDist($c['lat'], $c['lng'], $anchor->lat, $anchor->lng);
             if ($dist < $minDist) { $minDist = $dist; $closest = $c; }
         }
 
-        // Reject if the closest match is too far from the anchor (city 1° / province 3°).
-        // This evicts cross-region mismatches so attachCoords falls back to city/province jitter.
-        if ($minDist > $maxDist) return null;
+        // For barangays with a city anchor, use the same 0.3° tight cap as the single-candidate
+        // path — the closest of several wrong-municipality hits still loses to city-jitter fallback.
+        $effectiveMax = ($level === 'barangay' && $anchor) ? 0.3 : $maxDist;
+        if ($minDist > $effectiveMax) return null;
 
         return $this->isWithinPhilippines($closest['lat'], $closest['lng'])
             ? [$closest['lat'], $closest['lng']]
             : null;
+    }
+
+    private function manhattanDist(float $lat1, float $lng1, float $lat2, float $lng2): float
+    {
+        return abs($lat1 - $lat2) + abs($lng1 - $lng2);
     }
 
     /**
