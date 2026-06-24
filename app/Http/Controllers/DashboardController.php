@@ -90,21 +90,23 @@ class DashboardController extends Controller
             $ordersChange  = $this->percentChange((int)$prevRow->total_orders,    (int)$row->total_orders);
         }
 
-        // New customers: those whose first-ever order falls in the selected period
+        // New customers: those whose first-ever order falls in the selected period.
+        // Pre-aggregate MIN(ordered_at) per customer in one pass (uses orders_shop_customer_date
+        // index), then filter with HAVING — avoids the per-row correlated NOT EXISTS.
         $newCustomers = 0;
         if ($from && $to) {
-            $newCustomers = DB::table('orders as o')
-                ->where('o.shop_id', $shopId)
-                ->whereNotNull('o.customer_pancake_id')
-                ->whereBetween('o.ordered_at', [$from . ' 00:00:00', $to . ' 23:59:59'])
-                ->whereNotExists(function ($sq) use ($shopId, $from) {
-                    $sq->from('orders as prev')
-                        ->whereColumn('prev.customer_pancake_id', 'o.customer_pancake_id')
-                        ->where('prev.shop_id', $shopId)
-                        ->where('prev.ordered_at', '<', $from . ' 00:00:00');
-                })
-                ->distinct('customer_pancake_id')
-                ->count('customer_pancake_id');
+            $result = DB::selectOne("
+                SELECT COUNT(*) as cnt
+                FROM (
+                    SELECT customer_pancake_id, MIN(ordered_at) AS first_ordered_at
+                    FROM orders
+                    WHERE shop_id = ?
+                      AND customer_pancake_id IS NOT NULL
+                    GROUP BY customer_pancake_id
+                    HAVING first_ordered_at BETWEEN ? AND ?
+                ) t
+            ", [$shopId, $from . ' 00:00:00', $to . ' 23:59:59']);
+            $newCustomers = (int) ($result->cnt ?? 0);
         }
 
         $customers    = Customer::where('shop_id', $shopId)->count();
@@ -131,17 +133,24 @@ class DashboardController extends Controller
     private function getRevenueChart(int $shopId, ?string $from, ?string $to, ?string $pf = null): array
     {
         $q = Order::where('shop_id', $shopId)
-            ->where('status', 'delivered')
-            ->select(DB::raw('DATE(ordered_at) as date'), DB::raw('SUM(total_price) as revenue'), DB::raw('COUNT(*) as orders'))
+            ->select(
+                DB::raw('DATE(ordered_at) as date'),
+                DB::raw("SUM(CASE WHEN status='delivered' THEN total_price ELSE 0 END) as revenue"),
+                DB::raw("SUM(CASE WHEN status='delivered' THEN 1 ELSE 0 END) as orders"),
+                DB::raw('COUNT(*) as placed')
+            )
             ->groupBy('date')->orderBy('date');
         $this->applyDateFilter($q, $from, $to);
         $this->applyProductFilter($q, $pf);
-        $rows = $q->get();
+        $rows = $q->get()->keyBy('date');
+
+        $allDates = $rows->keys()->sort()->values();
 
         return [
-            'labels'  => $rows->pluck('date')->map(fn($d) => Carbon::parse($d)->format('M d'))->toArray(),
-            'revenue' => $rows->pluck('revenue')->map(fn($v) => round($v))->toArray(),
-            'orders'  => $rows->pluck('orders')->toArray(),
+            'labels'  => $allDates->map(fn($d) => Carbon::parse($d)->format('M d'))->toArray(),
+            'revenue' => $allDates->map(fn($d) => round($rows[$d]->revenue ?? 0))->toArray(),
+            'orders'  => $allDates->map(fn($d) => (int) ($rows[$d]->orders ?? 0))->toArray(),
+            'placed'  => $allDates->map(fn($d) => (int) ($rows[$d]->placed ?? 0))->toArray(),
         ];
     }
 
