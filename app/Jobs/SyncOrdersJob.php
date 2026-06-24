@@ -22,7 +22,8 @@ class SyncOrdersJob implements ShouldQueue
     public int $timeout = 3600;
     public int $tries   = 1; // resumable — no point retrying; dispatcher re-queues
 
-    private const PARALLEL_PAGES = 3; // pages fetched concurrently per batch
+    private const PARALLEL_PAGES    = 2; // pages fetched concurrently per batch
+    private const PAGE_RETRY_LIMIT  = 3; // per-page sequential retries before giving up
 
     public function __construct(
         private readonly int $shopModelId,
@@ -65,8 +66,12 @@ class SyncOrdersJob implements ShouldQueue
                 foreach ($pages as $p) {
                     $batch = $results[$p];
 
+                    // If parallel fetch failed, fall back to sequential retry for this page
                     if ($batch === null) {
-                        throw new \RuntimeException("Parallel fetch failed at page {$p} — will resume next run.");
+                        $batch = $this->fetchPageWithRetry($api, $p, $filters);
+                        if ($batch === null) {
+                            throw new \RuntimeException("Page {$p} failed after " . self::PAGE_RETRY_LIMIT . " retries — will resume next run.");
+                        }
                     }
 
                     if (empty($batch)) {
@@ -85,7 +90,7 @@ class SyncOrdersJob implements ShouldQueue
                 }
 
                 $page += self::PARALLEL_PAGES;
-                usleep(300000); // 300 ms between parallel batches — respect rate limits
+                usleep(500000); // 500 ms between batches — gentler on the API
             }
 
             Cache::forget($resumeKey);
@@ -113,6 +118,17 @@ class SyncOrdersJob implements ShouldQueue
         } finally {
             $lock->release();
         }
+    }
+
+    private function fetchPageWithRetry(PancakeApiService $api, int $page, array $filters): ?array
+    {
+        for ($attempt = 1; $attempt <= self::PAGE_RETRY_LIMIT; $attempt++) {
+            if ($attempt > 1) sleep(($attempt - 1) * 5); // 0 s, 5 s, 10 s backoff
+            Log::info("SyncOrdersJob: retrying page {$page} (attempt {$attempt}/" . self::PAGE_RETRY_LIMIT . ")");
+            $result = $api->getOrderPagesBatch([$page], $filters);
+            if ($result[$page] !== null) return $result[$page];
+        }
+        return null;
     }
 
     private function upsertBatch(int $shopId, array $batch): int
