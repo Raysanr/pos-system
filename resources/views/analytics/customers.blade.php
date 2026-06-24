@@ -356,7 +356,7 @@ $retPct  = 100 - $newPct;
     <div class="bg-white rounded-xl shadow-sm overflow-hidden" style="border:1px solid #DBEAFE;">
         <div class="px-5 py-4" style="border-bottom:1px solid #F1F5F9;">
             <h3 class="text-sm font-semibold" style="color:#1E293B;">Product Affinity</h3>
-            <p class="text-xs mt-0.5" style="color:#94A3B8;">Products most often bought together in the same order</p>
+            <p class="text-xs mt-0.5" style="color:#94A3B8;">Products most often bought together in the same order (delivered orders only)</p>
         </div>
         <table class="w-full">
             <thead>
