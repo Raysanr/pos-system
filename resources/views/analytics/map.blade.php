@@ -127,7 +127,8 @@ function getRadius(d) {
     const maxRevenue = Math.max(...currentData.map(x => x.total_revenue), 1);
     if (currentMode === 'volume')  return Math.max(minR, Math.sqrt(d.total_orders  / maxOrders)  * max);
     if (currentMode === 'revenue') return Math.max(minR, Math.sqrt(d.total_revenue / maxRevenue) * max);
-    return Math.max(minR, (d.rts_rate / 100) * max + minR);
+    const rateForSize = STATUS === 'returned' ? d.returned_rate : d.rts_rate;
+    return Math.max(minR, (rateForSize / 100) * max + minR);
 }
 
 function fmt(v) {
@@ -147,7 +148,8 @@ function renderMarkers() {
         const coords = getCoords(d);
         if (!coords) return;
 
-        const color = getRtsColor(d.rts_rate);
+        const bubbleRate = STATUS === 'returned' ? d.returned_rate : d.rts_rate;
+        const color = getRtsColor(bubbleRate);
         const circle = L.circleMarker(coords, {
             radius: getRadius(d),
             fillColor: color, color:'rgba(255,255,255,0.85)',
@@ -164,13 +166,17 @@ function renderMarkers() {
                    ${currentLevel==='province' ? 'View Cities ›' : 'View Barangays ›'}
                  </button></div>` : '';
 
+        const parentLabel = [d.city, d.province].filter(Boolean).map(titleCase).join(', ');
+        const rtLabel = STATUS === 'returned' ? 'Returned' : 'RTS';
+        const rtCount = STATUS === 'returned' ? d.returned_count : d.rts_count;
+        const rtRate  = STATUS === 'returned' ? d.returned_rate  : d.rts_rate;
         circle.bindPopup(`
           <div style="min-width:165px;font-family:-apple-system,sans-serif">
-            <div style="font-weight:700;font-size:13px;color:#1e293b;margin-bottom:8px;border-bottom:1px solid #f1f5f9;padding-bottom:6px">${titleCase(d.name)}</div>
+            <div style="font-weight:700;font-size:13px;color:#1e293b;margin-bottom:2px;border-bottom:1px solid #f1f5f9;padding-bottom:6px">${titleCase(d.name)}${parentLabel ? `<div style="font-weight:400;font-size:10px;color:#64748b;margin-top:2px">${parentLabel}</div>` : ''}</div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;color:#475569">
               <span>Orders</span><strong style="color:#1e40af;text-align:right">${d.total_orders.toLocaleString()}</strong>
               <span>Revenue</span><strong style="color:#059669;text-align:right">${fmt(d.total_revenue)}</strong>
-              <span>RTS</span><strong style="color:#dc2626;text-align:right">${d.rts_count} (${d.rts_rate}%)</strong>
+              <span>${rtLabel}</span><strong style="color:#dc2626;text-align:right">${rtCount} (${rtRate}%)</strong>
               <span>Avg Order</span><strong style="color:#7c3aed;text-align:right">${fmt(d.avg_order_value)}</strong>
             </div>${drillBtn}
           </div>`, { maxWidth:230 });
@@ -190,30 +196,28 @@ function updateTable() {
     }
 
     tbody.innerHTML = currentData.map((d,i) => {
-        const cls = d.rts_rate > 20 ? 'bg-red-100 text-red-700' : d.rts_rate > 10 ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700';
-        return `<tr class="border-t border-slate-100 hover:bg-blue-50/40 cursor-pointer location-row" data-name="${d.name.replace(/"/g,'&quot;')}">
+        const rate = STATUS === 'returned' ? d.returned_rate : d.rts_rate;
+        const cls = rate > 20 ? 'bg-red-100 text-red-700' : rate > 10 ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700';
+        return `<tr class="border-t border-slate-100 hover:bg-blue-50/40 cursor-pointer location-row" data-index="${i}">
             <td class="px-3 py-2.5 text-xs text-slate-400">${i+1}</td>
             <td class="px-3 py-2.5">
                 <div class="text-xs font-medium text-slate-700">${titleCase(d.name)}</div>
                 ${(d.city || d.province) ? `<div class="text-xs text-slate-400 mt-0.5">${[d.city, d.province].filter(Boolean).map(titleCase).join(', ')}</div>` : ''}
             </td>
             <td class="px-3 py-2.5 text-xs text-slate-700 text-right font-mono">${d.total_orders.toLocaleString()}</td>
-            <td class="px-3 py-2.5 text-right"><span class="inline-flex px-1.5 py-0.5 rounded text-xs font-medium ${cls}">${d.rts_rate}%</span></td>
+            <td class="px-3 py-2.5 text-right"><span class="inline-flex px-1.5 py-0.5 rounded text-xs font-medium ${cls}">${rate}%</span></td>
         </tr>`;
     }).join('');
 
     tbody.querySelectorAll('.location-row').forEach(row => {
         row.addEventListener('click', () => {
-            const name = row.dataset.name;
-            const item = currentData.find(d => d.name === name);
+            const idx = parseInt(row.dataset.index, 10);
+            const item = currentData[idx];
             const coords = item ? getCoords(item) : null;
             if (coords) {
-                // Pan to the marker but don't over-zoom — keep the user's current zoom
-                // or ease to a sensible max so context stays visible.
                 const maxZoom = { province:8, city:10, barangay:12 }[currentLevel] ?? 10;
                 map.setView(coords, Math.min(map.getZoom(), maxZoom), { animate:true });
-                const idx = currentData.findIndex(d => d.name === name);
-                if (idx >= 0 && markers[idx]) markers[idx].openPopup();
+                if (markers[idx]) markers[idx].openPopup();
             }
         });
     });

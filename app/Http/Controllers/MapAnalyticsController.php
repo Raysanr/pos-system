@@ -25,6 +25,7 @@ class MapAnalyticsController extends Controller
         $datePreset     = $this->detectDatePreset($dateFrom, $dateTo);
 
         $cacheKey = "map_{$shop->id}_{$dateFrom}_{$dateTo}_{$status}_{$level}_{$provinceFilter}_{$cityFilter}_{$productFilter}";
+        $mapData  = [];
         try {
             $mapData = Cache::remember($cacheKey, 1800, function () use ($shop, $dateFrom, $dateTo, $status, $level, $provinceFilter, $cityFilter, $productFilter) {
                 $data   = $this->getLocationData($shop->id, $dateFrom, $dateTo, $status, $level, $provinceFilter, $cityFilter, $productFilter);
@@ -76,33 +77,45 @@ class MapAnalyticsController extends Controller
             };
         }
 
-        $selectCols = [
+        // Group by parent columns too so same-name locations (e.g. "Poblacion")
+        // in different cities/provinces are not merged into one bubble.
+        $groupByCols = [$groupCol];
+        $selectCols  = [
             DB::raw("{$groupCol} as location_name"),
             DB::raw('COUNT(*) as total_orders'),
             DB::raw("SUM(CASE WHEN status='delivered' THEN total_price ELSE 0 END) as total_revenue"),
             DB::raw('SUM(CASE WHEN is_rts=1 THEN 1 ELSE 0 END) as rts_count'),
             DB::raw('ROUND(SUM(CASE WHEN is_rts=1 THEN 1 ELSE 0 END)*100.0/COUNT(*),1) as rts_rate'),
+            DB::raw('SUM(CASE WHEN is_returned=1 THEN 1 ELSE 0 END) as returned_count'),
+            DB::raw('ROUND(SUM(CASE WHEN is_returned=1 THEN 1 ELSE 0 END)*100.0/COUNT(*),1) as returned_rate'),
             DB::raw("AVG(CASE WHEN status='delivered' THEN total_price ELSE NULL END) as avg_order_value"),
         ];
 
-        if ($level === 'city')     $selectCols[] = DB::raw('MAX(province) as parent_province');
+        if ($level === 'city') {
+            $groupByCols[] = 'province';
+            $selectCols[]  = DB::raw('province as parent_province');
+        }
         if ($level === 'barangay') {
-            $selectCols[] = DB::raw('MAX(province) as parent_province');
-            $selectCols[] = DB::raw('MAX(district) as parent_city');
+            $groupByCols[] = 'district';
+            $groupByCols[] = 'province';
+            $selectCols[]  = DB::raw('province as parent_province');
+            $selectCols[]  = DB::raw('district as parent_city');
         }
 
         return $query->select($selectCols)
-        ->groupBy($groupCol)
+        ->groupBy(...$groupByCols)
         ->orderByDesc('total_orders')
         ->get()
         ->map(fn($r) => [
             'name'            => $r->location_name,
-            'province'        => $r->parent_province ?? null,
-            'city'            => $r->parent_city     ?? null,
+            'province'        => $r->parent_province  ?? null,
+            'city'            => $r->parent_city       ?? null,
             'total_orders'    => (int)   $r->total_orders,
             'total_revenue'   => round($r->total_revenue),
             'rts_count'       => (int)   $r->rts_count,
             'rts_rate'        => (float) $r->rts_rate,
+            'returned_count'  => (int)   $r->returned_count,
+            'returned_rate'   => (float) $r->returned_rate,
             'avg_order_value' => round($r->avg_order_value ?? 0),
         ])
         ->toArray();
