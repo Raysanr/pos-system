@@ -16,7 +16,7 @@ class MapAnalyticsController extends Controller
         $dateFrom = $request->input('date_from', now()->subDays(30)->format('Y-m-d')) ?: null;
         $dateTo   = $request->input('date_to',   now()->format('Y-m-d'))              ?: null;
         $status   = $request->input('status', 'all');
-        $level    = in_array($request->input('level'), ['province', 'city', 'barangay'])
+        $level    = in_array($request->input('level'), ['province', 'city'])
                     ? $request->input('level') : 'province';
         $provinceFilter = $request->input('province_filter');
         $cityFilter     = $request->input('city_filter');

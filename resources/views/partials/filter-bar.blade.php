@@ -68,7 +68,7 @@
          @keydown.escape.window="open = false">
 
         {{-- Trigger --}}
-        <button type="button" @click="toggle()"
+        <button type="button" @click.stop="toggle()"
                 x-ref="trigger"
                 aria-label="Filter by product"
                 :aria-expanded="open"
@@ -88,7 +88,7 @@
 
         {{-- Dropdown panel — teleported to <body> to escape all stacking contexts --}}
         <template x-teleport="body">
-        <div x-show="open" x-cloak @click.outside="open = false"
+        <div x-show="open" x-cloak @click.outside="open = false" @click.stop
              x-transition:enter="transition ease-out duration-150"
              x-transition:enter-start="opacity-0 scale-y-95 -translate-y-1"
              x-transition:enter-end="opacity-100 scale-y-100 translate-y-0"

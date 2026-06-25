@@ -1,6 +1,6 @@
 @extends('layouts.app')
 @section('title', 'PH Map')
-@section('subtitle', 'Order heatmap — Province · City · Barangay')
+@section('subtitle', 'Order heatmap — Province · City')
 
 @push('head')
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
@@ -29,7 +29,6 @@
         <span class="text-xs text-slate-500 font-medium">Level:</span>
         <button id="level-btn-province" onclick="setLevel('province')" class="inline-flex items-center px-2.5 py-1.5 text-xs font-medium rounded-lg bg-blue-700 text-white cursor-pointer">Province</button>
         <button id="level-btn-city" onclick="setLevel('city')" class="inline-flex items-center px-2.5 py-1.5 text-xs font-medium rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer">City</button>
-        <button id="level-btn-barangay" onclick="setLevel('barangay')" class="inline-flex items-center px-2.5 py-1.5 text-xs font-medium rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer">Barangay</button>
     </div>
 </div>
 @endsection
@@ -115,14 +114,13 @@ function getRtsColor(rate) {
 
 // Fixed pixel radii — circles stay the same pixel size when zoomed in so the map stays visible
 function levelMaxPx() {
-    if (currentLevel === 'barangay') return 22;
-    if (currentLevel === 'city')     return 34;
+    if (currentLevel === 'city') return 34;
     return 48; // province
 }
 
 function getRadius(d) {
     const max        = levelMaxPx();
-    const minR       = currentLevel === 'barangay' ? 6 : 8;
+    const minR       = 8;
     const maxOrders  = Math.max(...currentData.map(x => x.total_orders),  1);
     const maxRevenue = Math.max(...currentData.map(x => x.total_revenue), 1);
     if (currentMode === 'volume')  return Math.max(minR, Math.sqrt(d.total_orders  / maxOrders)  * max);
@@ -158,12 +156,12 @@ function renderMarkers() {
 
         const drillFn = currentLevel === 'province'
             ? `drillDown('${d.name.replace(/'/g,"\\'")}',null)`
-            : `drillDown(currentProvinceFilter,'${d.name.replace(/'/g,"\\'")}')`;
-        const drillBtn = currentLevel !== 'barangay'
+            : null;
+        const drillBtn = drillFn
             ? `<div style="margin-top:8px;text-align:center">
                  <button onclick="${drillFn}"
                    style="font-size:10px;padding:3px 10px;background:#1e40af;color:#fff;border:none;border-radius:4px;cursor:pointer">
-                   ${currentLevel==='province' ? 'View Cities ›' : 'View Barangays ›'}
+                   View Cities ›
                  </button></div>` : '';
 
         const parentLabel = [d.city, d.province].filter(Boolean).map(titleCase).join(', ');
@@ -215,7 +213,7 @@ function updateTable() {
             const item = currentData[idx];
             const coords = item ? getCoords(item) : null;
             if (coords) {
-                const maxZoom = { province:8, city:10, barangay:12 }[currentLevel] ?? 10;
+                const maxZoom = { province:8, city:10 }[currentLevel] ?? 10;
                 map.setView(coords, Math.min(map.getZoom(), maxZoom), { animate:true });
                 if (markers[idx]) markers[idx].openPopup();
             }
@@ -232,24 +230,17 @@ function updateBreadcrumb() {
     let parts = [`<button onclick="setLevel('province')" class="text-blue-600 hover:underline font-medium">🗺 All Provinces</button>`];
     if (currentProvinceFilter) {
         const pd = titleCase(currentProvinceFilter);
-        if (currentLevel === 'city') {
-            parts.push(`<span class="text-slate-400">›</span><span class="text-slate-700 font-medium">${pd}</span>`);
-        } else {
-            parts.push(`<span class="text-slate-400">›</span><button onclick="drillDown('${currentProvinceFilter.replace(/'/g,"\\'")}',null,'city')" class="text-blue-600 hover:underline font-medium">${pd}</button>`);
-        }
-    }
-    if (currentCityFilter) {
-        parts.push(`<span class="text-slate-400">›</span><span class="text-slate-700 font-medium">${titleCase(currentCityFilter)}</span>`);
+        parts.push(`<span class="text-slate-400">›</span><span class="text-slate-700 font-medium">${pd}</span>`);
     }
     bc.innerHTML = parts.join(' ');
 }
 
 function updateLevelUI() {
-    const levelLabels = { province:'Province', city:'City / Municipality', barangay:'Barangay' };
-    document.getElementById('table-level-label').textContent = levelLabels[currentLevel];
-    document.getElementById('table-col-label').textContent   = levelLabels[currentLevel];
+    const levelLabels = { province:'Province', city:'City / Municipality' };
+    document.getElementById('table-level-label').textContent = levelLabels[currentLevel] ?? currentLevel;
+    document.getElementById('table-col-label').textContent   = levelLabels[currentLevel] ?? currentLevel;
 
-    ['province','city','barangay'].forEach(l => {
+    ['province','city'].forEach(l => {
         const btn = document.getElementById('level-btn-'+l);
         if (!btn) return;
         btn.className = l === currentLevel
@@ -263,13 +254,12 @@ async function drillDown(name, cityName, levelOverride) {
     if (isLoading) return;
     let level = levelOverride;
     if (!level) {
-        if (cityName)  { level = 'barangay'; }
-        else if (name) { level = 'city'; }
-        else           { level = 'province'; }
+        if (name) { level = 'city'; }
+        else      { level = 'province'; }
     }
     currentLevel          = level;
     currentProvinceFilter = level !== 'province' ? (name || currentProvinceFilter) : null;
-    currentCityFilter     = level === 'barangay' ? (cityName || null) : null;
+    currentCityFilter     = null;
     await loadData();
 }
 

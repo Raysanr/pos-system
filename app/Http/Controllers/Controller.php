@@ -59,8 +59,11 @@ abstract class Controller
 
     protected function applyDateFilter($query, ?string $from, ?string $to): mixed
     {
-        if ($from && $to) {
-            $query->whereBetween('ordered_at', [$from . ' 00:00:00', $to . ' 23:59:59']);
+        $effectiveTo = ($to ?? now()->format('Y-m-d')) . ' 23:59:59';
+        if ($from) {
+            $query->whereBetween('ordered_at', [$from . ' 00:00:00', $effectiveTo]);
+        } else {
+            $query->where('ordered_at', '<=', $effectiveTo);
         }
         return $query;
     }
@@ -93,10 +96,14 @@ abstract class Controller
         $whereParts = ['o.shop_id = ?'];
         $params     = [$shopId];
 
-        if ($from && $to) {
+        $effectiveTo = ($to ?? now()->format('Y-m-d')) . ' 23:59:59';
+        if ($from) {
             $whereParts[] = 'o.ordered_at BETWEEN ? AND ?';
             $params[]     = $from . ' 00:00:00';
-            $params[]     = $to   . ' 23:59:59';
+            $params[]     = $effectiveTo;
+        } else {
+            $whereParts[] = 'o.ordered_at <= ?';
+            $params[]     = $effectiveTo;
         }
         if ($pf) {
             // When a product filter is active, restrict the item-level count to that product
@@ -112,7 +119,7 @@ abstract class Controller
 
         $result = DB::selectOne("
             SELECT SUM(
-                MAX(CAST(json_extract(item.value, '$.variation_info.name') AS INTEGER), 1)
+                MAX(CAST(json_extract(item.value, '$.variation_info.display_id') AS INTEGER), 1)
                 * MAX(CAST(COALESCE(json_extract(item.value, '$.quantity'), 1) AS INTEGER), 1)
             ) as total_bottles
             FROM orders o, json_each(o.items) AS item

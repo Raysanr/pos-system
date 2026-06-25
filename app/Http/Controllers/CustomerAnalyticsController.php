@@ -103,8 +103,11 @@ class CustomerAnalyticsController extends Controller
     // Applies date + product filters directly to an orders query builder (Eloquent or DB).
     private function applyOrderFilters($q, ?string $dateFrom, ?string $dateTo, ?string $productFilter): void
     {
-        if ($dateFrom && $dateTo) {
-            $q->whereBetween('ordered_at', [$dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
+        $effectiveTo = ($dateTo ?? now()->format('Y-m-d')) . ' 23:59:59';
+        if ($dateFrom) {
+            $q->whereBetween('ordered_at', [$dateFrom . ' 00:00:00', $effectiveTo]);
+        } else {
+            $q->where('ordered_at', '<=', $effectiveTo);
         }
         if ($productFilter) {
             $q->whereRaw(
@@ -129,8 +132,11 @@ class CustomerAnalyticsController extends Controller
             ->select('c.gender', DB::raw('COUNT(DISTINCT o.customer_pancake_id) as count'))
             ->groupBy('c.gender');
 
-        if ($dateFrom && $dateTo) {
-            $q->whereBetween('o.ordered_at', [$dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
+        $genderEffectiveTo = ($dateTo ?? now()->format('Y-m-d')) . ' 23:59:59';
+        if ($dateFrom) {
+            $q->whereBetween('o.ordered_at', [$dateFrom . ' 00:00:00', $genderEffectiveTo]);
+        } else {
+            $q->where('o.ordered_at', '<=', $genderEffectiveTo);
         }
         if ($productFilter) {
             $q->whereRaw(
@@ -296,10 +302,14 @@ class CustomerAnalyticsController extends Controller
         $whereParts = ['o.shop_id = ?'];
         $params     = [$shopId];
 
-        if ($dateFrom && $dateTo) {
+        $basketEffectiveTo = ($dateTo ?? now()->format('Y-m-d')) . ' 23:59:59';
+        if ($dateFrom) {
             $whereParts[] = 'o.ordered_at BETWEEN ? AND ?';
             $params[]     = $dateFrom . ' 00:00:00';
-            $params[]     = $dateTo   . ' 23:59:59';
+            $params[]     = $basketEffectiveTo;
+        } else {
+            $whereParts[] = 'o.ordered_at <= ?';
+            $params[]     = $basketEffectiveTo;
         }
 
         if ($productFilter) {
@@ -312,7 +322,7 @@ class CustomerAnalyticsController extends Controller
         $innerSql = "
             SELECT o.id,
                    SUM(
-                       MAX(CAST(json_extract(item.value, '$.variation_info.name') AS INTEGER), 1)
+                       MAX(CAST(json_extract(item.value, '$.variation_info.display_id') AS INTEGER), 1)
                        * MAX(CAST(COALESCE(json_extract(item.value, '$.quantity'), 1) AS INTEGER), 1)
                    ) AS bottle_count
             FROM orders o, json_each(o.items) AS item
@@ -343,13 +353,19 @@ class CustomerAnalyticsController extends Controller
 
     private function getProductAffinity(int $shopId, ?string $dateFrom, ?string $dateTo): array
     {
-        $whereParts = ['o.shop_id = ?'];
+        // Restrict to delivered orders: reduces the working set for the self-join
+        // and makes affinity results reflect actual purchases, not cancelled/RTS orders.
+        $whereParts = ["o.shop_id = ?", "o.status = 'delivered'"];
         $params     = [$shopId];
 
-        if ($dateFrom && $dateTo) {
+        $affinityEffectiveTo = ($dateTo ?? now()->format('Y-m-d')) . ' 23:59:59';
+        if ($dateFrom) {
             $whereParts[] = 'o.ordered_at BETWEEN ? AND ?';
             $params[]     = $dateFrom . ' 00:00:00';
-            $params[]     = $dateTo   . ' 23:59:59';
+            $params[]     = $affinityEffectiveTo;
+        } else {
+            $whereParts[] = 'o.ordered_at <= ?';
+            $params[]     = $affinityEffectiveTo;
         }
 
         $where = implode(' AND ', $whereParts);
@@ -373,19 +389,29 @@ class CustomerAnalyticsController extends Controller
 
     private function getFirstProductPurchased(int $shopId): array
     {
-        $sql = "SELECT LOWER(json_extract(item.value, '$.variation_info.name')) as product_name,
-                       COUNT(DISTINCT o.customer_pancake_id) as first_buyers
-                FROM orders o, json_each(o.items) as item
-                WHERE o.shop_id = ?
-                  AND o.customer_pancake_id IS NOT NULL
-                  AND json_extract(item.value, '$.variation_info.name') IS NOT NULL
-                  AND o.ordered_at = (
-                      SELECT MIN(o2.ordered_at) FROM orders o2
-                      WHERE o2.shop_id = ? AND o2.customer_pancake_id = o.customer_pancake_id
-                  )
-                GROUP BY product_name
-                ORDER BY first_buyers DESC
-                LIMIT 10";
+        // CTE pre-aggregates each customer's first order in one pass using the
+        // orders_shop_customer_date index, then joins back — avoids a correlated
+        // subquery that would fire once per order row.
+        $sql = "
+            WITH first_orders AS (
+                SELECT customer_pancake_id, MIN(ordered_at) AS first_ordered_at
+                FROM orders
+                WHERE shop_id = ?
+                  AND customer_pancake_id IS NOT NULL
+                GROUP BY customer_pancake_id
+            )
+            SELECT LOWER(json_extract(item.value, '$.variation_info.name')) AS product_name,
+                   COUNT(DISTINCT o.customer_pancake_id) AS first_buyers
+            FROM first_orders fo
+            JOIN orders o ON o.customer_pancake_id = fo.customer_pancake_id
+                         AND o.ordered_at = fo.first_ordered_at
+                         AND o.shop_id = ?,
+                 json_each(o.items) AS item
+            WHERE json_extract(item.value, '$.variation_info.name') IS NOT NULL
+            GROUP BY product_name
+            ORDER BY first_buyers DESC
+            LIMIT 10
+        ";
 
         return array_map(
             fn($r) => ['product_name' => $r->product_name, 'first_buyers' => $r->first_buyers],

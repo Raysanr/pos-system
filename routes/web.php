@@ -6,6 +6,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\MapAnalyticsController;
 use App\Http\Controllers\ProductAudienceController;
 use App\Http\Controllers\RtsAnalyticsController;
+use App\Http\Controllers\SeasonalTrendController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\WebhookController;
 use Illuminate\Support\Facades\Route;
@@ -25,6 +26,7 @@ Route::prefix('analytics')->name('analytics.')->group(function () {
     Route::get('/rts',              [RtsAnalyticsController::class,       'index'])->name('rts');
     Route::get('/map',              [MapAnalyticsController::class,       'index'])->name('map');
     Route::get('/map/data',         [MapAnalyticsController::class,       'index'])->name('map.data');
+    Route::get('/seasonal',         [SeasonalTrendController::class,      'index'])->name('seasonal');
     Route::get('/pulse',            [AnalyticsPulseController::class,     'pulse'])->name('pulse');
 });
 

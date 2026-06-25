@@ -300,6 +300,19 @@ function showStatus(type, msg) {
     statusEl.textContent = msg;
 }
 
+const mainEl = document.querySelector('main');
+
+const savedScroll = sessionStorage.getItem('settings_scroll');
+if (savedScroll && mainEl) {
+    sessionStorage.removeItem('settings_scroll');
+    mainEl.scrollTop = parseInt(savedScroll, 10);
+}
+
+function reloadKeepScroll() {
+    sessionStorage.setItem('settings_scroll', mainEl ? mainEl.scrollTop : 0);
+    window.location.reload();
+}
+
 // Auto-refresh sync log while a job is running
 const hasRunning = {{ $syncLogs?->where('status', 'running')->count() > 0 ? 'true' : 'false' }};
 const syncIndicator = document.getElementById('syncIndicator');
@@ -308,23 +321,15 @@ if (hasRunning && syncIndicator) {
     syncIndicator.classList.remove('hidden');
     syncIndicator.classList.add('flex');
     let countdown = 5;
-    const timer = setInterval(() => {
-        countdown--;
-        syncIndicator.querySelector('svg + span') && null;
-        if (countdown <= 0) {
-            clearInterval(timer);
-            window.location.reload();
-        }
-    }, 1000);
-
-    // Show countdown in the indicator
     const countEl = document.createElement('span');
     syncIndicator.appendChild(countEl);
-    const countTimer = setInterval(() => {
-        countdown > 0
-            ? (countEl.textContent = ` (refresh in ${countdown}s)`)
-            : clearInterval(countTimer);
-    }, 200);
+    const timer = setInterval(() => {
+        countEl.textContent = ` (refresh in ${countdown}s)`;
+        if (--countdown <= 0) {
+            clearInterval(timer);
+            reloadKeepScroll();
+        }
+    }, 1000);
 }
 
 // Also start polling after Sync Now form submit
@@ -334,7 +339,7 @@ document.querySelectorAll('form[action="{{ route('settings.sync') }}"]').forEach
             syncIndicator.classList.remove('hidden');
             syncIndicator.classList.add('flex');
         }
-        setTimeout(() => window.location.reload(), 6000);
+        setTimeout(reloadKeepScroll, 6000);
     });
 });
 </script>

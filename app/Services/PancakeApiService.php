@@ -157,7 +157,11 @@ class PancakeApiService
                 $requests[] = $pool->as("p{$page}")
                     ->withHeaders(['Authorization' => "Bearer {$apiKey}"])
                     ->connectTimeout(15)
-                    ->timeout(180)
+                    ->timeout(120)
+                    ->withOptions([
+                        CURLOPT_LOW_SPEED_LIMIT => 10,
+                        CURLOPT_LOW_SPEED_TIME  => 60,
+                    ])
                     ->get($baseUrl, array_merge($filters, [
                         'page'      => $page,
                         'page_size' => $perPage,
@@ -217,8 +221,12 @@ class PancakeApiService
     {
         return Http::withHeaders(['Authorization' => "Bearer {$this->apiKey}"])
             ->connectTimeout(15)
-            ->timeout(180)  // 3 min — Pancake pages can be 2 MB+; 30 s was too short
-            ->retry(2, 3000)
+            ->timeout(120)
+            ->withOptions([
+                CURLOPT_LOW_SPEED_LIMIT => 10,  // abort if transfer drops below 10 bytes/s
+                CURLOPT_LOW_SPEED_TIME  => 60,  // for 60 consecutive seconds (catches stalled connections)
+            ])
+            ->retry(3, 5000)
             ->get(self::BASE_URL . $endpoint, array_merge($params, [
                 'api_key' => $this->apiKey,
             ]));

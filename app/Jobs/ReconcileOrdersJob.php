@@ -92,6 +92,15 @@ class ReconcileOrdersJob implements ShouldQueue
             $cod     = (float) ($raw['cod']     ?? 0);
             $prepaid = (float) ($raw['prepaid'] ?? 0);
 
+            $orderNote    = $raw['note'] ?? null;
+            $consultParts = [];
+            foreach ($raw['customer']['notes'] ?? [] as $n) {
+                if (($n['order_id'] ?? null) === '' && !empty($n['message']) && empty($n['removed_at'])) {
+                    $consultParts[] = $n['message'];
+                }
+            }
+            $combinedNote = trim(implode("\n", array_filter(array_merge([$orderNote], $consultParts)))) ?: null;
+
             $records[] = [
                 'shop_id'             => $shopId,
                 'pancake_id'          => (string) ($raw['id'] ?? ''),
@@ -119,10 +128,10 @@ class ReconcileOrdersJob implements ShouldQueue
                 'is_returned'         => $status === 5,
                 'is_cancelled'        => $status === 6,
                 'is_wholesale'        => (bool) ($raw['is_exchange_order'] ?? false),
-                'extra_note'          => $raw['note'] ?? null,
+                'extra_note'          => $combinedNote,
                 'return_reason'       => $raw['returned_reason_name'] ?? null,
-                'customer_age'        => DemographicsExtractor::age($raw['note'] ?? null),
-                'health_condition'    => ($c = DemographicsExtractor::conditions($raw['note'] ?? null)) ? json_encode($c) : null,
+                'customer_age'        => DemographicsExtractor::age($combinedNote),
+                'health_condition'    => ($c = DemographicsExtractor::conditions($combinedNote)) ? json_encode($c) : null,
                 'items'               => isset($raw['items'])    ? json_encode($raw['items'])    : null,
                 'utm_data'            => ($utm = array_filter([
                     'source'   => $raw['p_utm_source']   ?? null,

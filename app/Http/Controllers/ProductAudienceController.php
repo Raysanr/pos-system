@@ -57,7 +57,7 @@ class ProductAudienceController extends Controller
                 [$product]
             );
         if ($from) $q->where('ordered_at', '>=', $from . ' 00:00:00');
-        if ($to)   $q->where('ordered_at', '<=', $to   . ' 23:59:59');
+        $q->where('ordered_at', '<=', ($to ?? now()->format('Y-m-d')) . ' 23:59:59');
         return $q;
     }
 
@@ -125,7 +125,7 @@ class ProductAudienceController extends Controller
                         [$product]
                     );
                 if ($from) $sub->where('ordered_at', '>=', $from . ' 00:00:00');
-                if ($to)   $sub->where('ordered_at', '<=', $to   . ' 23:59:59');
+                $sub->where('ordered_at', '<=', ($to ?? now()->format('Y-m-d')) . ' 23:59:59');
             })
             ->select('c.gender', DB::raw('COUNT(*) as cnt'))
             ->groupBy('c.gender')
@@ -150,7 +150,7 @@ class ProductAudienceController extends Controller
         $bindings = [$shopId, $product];
         $dateWhere = '';
         if ($from) { $dateWhere .= " AND o.ordered_at >= ?"; $bindings[] = $from . ' 00:00:00'; }
-        if ($to)   { $dateWhere .= " AND o.ordered_at <= ?"; $bindings[] = $to   . ' 23:59:59'; }
+        $dateWhere .= " AND o.ordered_at <= ?"; $bindings[] = ($to ?? now()->format('Y-m-d')) . ' 23:59:59';
 
         // Path 1: use pre-computed health_condition JSON arrays (fast)
         $rows = DB::select("
@@ -188,7 +188,7 @@ class ProductAudienceController extends Controller
                 [$product]
             );
         if ($from) $q->where('o.ordered_at', '>=', $from . ' 00:00:00');
-        if ($to)   $q->where('o.ordered_at', '<=', $to   . ' 23:59:59');
+        $q->where('o.ordered_at', '<=', ($to ?? now()->format('Y-m-d')) . ' 23:59:59');
 
         $scanned = 0;
         $q->select('o.id', 'o.extra_note')->orderBy('o.id')->chunk(500, function ($orders) use (&$counts, &$scanned) {
@@ -203,6 +203,14 @@ class ProductAudienceController extends Controller
                 return false;
             }
         });
+
+        // Filter to only show conditions relevant to the product's category
+        // so e.g. "Stroke" doesn't appear on a skin product's chart.
+        $category = DemographicsExtractor::categoryForProduct($product);
+        $allowed  = DemographicsExtractor::labelsForCategory($category);
+        if ($allowed !== null) {
+            $counts = array_intersect_key($counts, array_flip($allowed));
+        }
 
         arsort($counts);
         $top = array_slice($counts, 0, 12, true);
@@ -240,7 +248,7 @@ class ProductAudienceController extends Controller
             );
 
         if ($from) $sub->where('ordered_at', '>=', $from . ' 00:00:00');
-        if ($to)   $sub->where('ordered_at', '<=', $to   . ' 23:59:59');
+        $sub->where('ordered_at', '<=', ($to ?? now()->format('Y-m-d')) . ' 23:59:59');
 
         $sub->select('customer_pancake_id', DB::raw('COUNT(*) as cnt'))
             ->groupBy('customer_pancake_id');
@@ -271,7 +279,7 @@ class ProductAudienceController extends Controller
             );
 
         if ($from) $q->where('o.ordered_at', '>=', $from . ' 00:00:00');
-        if ($to)   $q->where('o.ordered_at', '<=', $to   . ' 23:59:59');
+        $q->where('o.ordered_at', '<=', ($to ?? now()->format('Y-m-d')) . ' 23:59:59');
 
         return $q->select(
                 'c.name', 'c.phone', 'c.province', 'c.gender',

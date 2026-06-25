@@ -26,10 +26,32 @@ class SyncCustomersJob implements ShouldQueue
     {
         $shop = PancakeShop::findOrFail($this->shopModelId);
 
-        $lock = Cache::lock("sync_customers_lock_{$shop->id}", 3700);
+        $lockKey = "sync_customers_lock_{$shop->id}";
+        $lock    = Cache::lock($lockKey, 3700);
         if (!$lock->get()) {
-            Log::info("SyncCustomersJob: shop {$shop->shop_id} already syncing, skipping duplicate.");
-            return;
+            $stale = SyncLog::where('shop_id', $shop->id)
+                ->where('type', 'customers')
+                ->where('status', 'running')
+                ->where('started_at', '<', now()->subSeconds($this->timeout + 60))
+                ->exists();
+
+            if ($stale) {
+                Log::warning("SyncCustomersJob: stale lock detected for shop {$shop->shop_id}, force-releasing.");
+                Cache::lock($lockKey)->forceRelease();
+                SyncLog::where('shop_id', $shop->id)
+                    ->where('type', 'customers')
+                    ->where('status', 'running')
+                    ->whereNull('finished_at')
+                    ->update(['status' => 'failed', 'error_message' => 'Stale lock — previous worker died.', 'finished_at' => now()]);
+                $lock = Cache::lock($lockKey, 3700);
+                if (!$lock->get()) {
+                    Log::error("SyncCustomersJob: could not acquire lock even after force-release for shop {$shop->shop_id}.");
+                    return;
+                }
+            } else {
+                Log::info("SyncCustomersJob: shop {$shop->shop_id} already syncing, skipping duplicate.");
+                return;
+            }
         }
 
         $log           = null;

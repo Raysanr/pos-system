@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>SH Customer's Analytics — @yield('title', 'Dashboard')</title>
+    <link rel="icon" type="image/svg+xml" href="/sh-logo.svg">
+    <link rel="shortcut icon" href="/sh-logo.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -194,14 +196,6 @@
                 Product Audience
             </a>
 
-            <a href="{{ route('analytics.rts') }}"
-               class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150"
-               style="{{ request()->routeIs('analytics.rts') ? 'background:#F5A623; color:#0F172A;' : 'color:#94A3B8;' }}"
-               onmouseover="{{ request()->routeIs('analytics.rts') ? '' : "this.style.background='rgba(245,166,35,0.1)';this.style.color='#F5A623';" }}"
-               onmouseout="{{ request()->routeIs('analytics.rts') ? '' : "this.style.background='';this.style.color='#94A3B8';" }}">
-                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
-                RTS & Returns
-            </a>
 
             <a href="{{ route('analytics.map') }}"
                class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150"
@@ -210,6 +204,15 @@
                onmouseout="{{ request()->routeIs('analytics.map*') ? '' : "this.style.background='';this.style.color='#94A3B8';" }}">
                 <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
                 PH Map
+            </a>
+
+            <a href="{{ route('analytics.seasonal') }}"
+               class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150"
+               style="{{ request()->routeIs('analytics.seasonal') ? 'background:#F5A623; color:#0F172A;' : 'color:#94A3B8;' }}"
+               onmouseover="{{ request()->routeIs('analytics.seasonal') ? '' : "this.style.background='rgba(245,166,35,0.1)';this.style.color='#F5A623';" }}"
+               onmouseout="{{ request()->routeIs('analytics.seasonal') ? '' : "this.style.background='';this.style.color='#94A3B8';" }}">
+                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                Seasonal Trends
             </a>
 
             <p class="px-3 mt-4 mb-2 text-xs font-semibold uppercase tracking-widest" style="color:#475569;">System</p>
@@ -223,6 +226,18 @@
                 Settings
             </a>
         </nav>
+
+        <!-- Back to Seller's Hub -->
+        <div class="px-3 pb-3">
+            <a href="http://localhost:8080/home"
+               class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium w-full transition-all duration-150"
+               style="color:#64748B; border:1px solid #1E293B;"
+               onmouseover="this.style.background='rgba(245,166,35,0.1)';this.style.color='#F5A623';this.style.borderColor='rgba(245,166,35,0.3)';"
+               onmouseout="this.style.background='';this.style.color='#64748B';this.style.borderColor='#1E293B';">
+                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+                Back to Seller's Hub
+            </a>
+        </div>
 
         <!-- User -->
         <div class="px-3 py-4 border-t" style="border-color:#1E293B;">

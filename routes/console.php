@@ -27,11 +27,12 @@ Schedule::call(function () {
     });
 })->everyFiveMinutes()->name('reconcile-orders')->withoutOverlapping();
 
-// ── Daily 3 am: open-order sweep ───────────────────────────────────────────────
+// ── Every 2 hours: open-order sweep ───────────────────────────────────────────
 // Re-fetches every non-terminal order individually to catch status changes on
 // older orders that the 5-min reconciliation (newest pages only) doesn't reach.
+// Running every 2 hours instead of daily so deliveries show up same-day.
 Schedule::call(function () {
     PancakeShop::where('is_active', true)->each(function ($shop) {
         RefreshOpenOrdersJob::dispatch($shop->id);
     });
-})->dailyAt('03:00')->name('refresh-open-orders')->withoutOverlapping();
+})->everyTwoHours()->name('refresh-open-orders')->withoutOverlapping();

@@ -15,7 +15,7 @@
 
 @section('content')
 <!-- KPI Cards -->
-<div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
     <div class="bg-white rounded-xl border border-blue-100 p-5 shadow-sm hover:shadow-md transition-shadow">
         <div class="flex items-center justify-between mb-3">
             <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Confirmed Revenue</span>
@@ -54,17 +54,6 @@
 
     <div class="bg-white rounded-xl border border-blue-100 p-5 shadow-sm hover:shadow-md transition-shadow">
         <div class="flex items-center justify-between mb-3">
-            <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">RTS Rate</span>
-            <div class="w-8 h-8 rounded-lg bg-red-50 flex items-center justify-center">
-                <svg class="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
-            </div>
-        </div>
-        <div id="kpi-rts-rate" class="text-2xl font-bold text-slate-900 font-mono">{{ $kpis['rts_rate'] }}%</div>
-        <div id="kpi-rts-sub" class="mt-1 text-xs text-slate-500">{{ number_format($kpis['rts_count']) }} orders returned</div>
-    </div>
-
-    <div class="bg-white rounded-xl border border-blue-100 p-5 shadow-sm hover:shadow-md transition-shadow">
-        <div class="flex items-center justify-between mb-3">
             <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Avg Order Value</span>
             <div class="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center">
                 <svg class="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
@@ -92,7 +81,7 @@
         <div class="flex items-center justify-between mb-4">
             <div>
                 <h3 class="text-sm font-semibold text-slate-800">Confirmed Revenue & Orders Trend</h3>
-                <p class="text-xs text-slate-400">Delivered orders only — daily breakdown for selected period</p>
+                <p class="text-xs text-slate-400">Revenue & delivered orders vs. all orders placed — daily breakdown</p>
             </div>
         </div>
         <canvas id="revenueChart" height="100"></canvas>
@@ -197,12 +186,25 @@ window.__charts.revenue = new Chart(document.getElementById('revenueChart'), {
                 yAxisID: 'y',
             },
             {
-                label: 'Orders',
+                label: 'Delivered Orders',
                 data: revenueData.orders,
                 type: 'line',
                 borderColor: '#D97706',
                 backgroundColor: 'rgba(217,119,6,0.1)',
                 borderWidth: 2,
+                pointRadius: 3,
+                tension: 0.4,
+                fill: false,
+                yAxisID: 'y1',
+            },
+            {
+                label: 'Orders Placed',
+                data: revenueData.placed,
+                type: 'line',
+                borderColor: '#10B981',
+                backgroundColor: 'rgba(16,185,129,0.08)',
+                borderWidth: 2,
+                borderDash: [5, 3],
                 pointRadius: 3,
                 tension: 0.4,
                 fill: false,
@@ -213,7 +215,7 @@ window.__charts.revenue = new Chart(document.getElementById('revenueChart'), {
     options: {
         responsive: true,
         interaction: { mode: 'index', intersect: false },
-        plugins: { legend: { position: 'top', labels: { font: { size: 11, family: 'Fira Sans' }, boxWidth: 12 } }, tooltip: { callbacks: { label: ctx => ctx.datasetIndex===0 ? `Revenue: ₱${ctx.raw.toLocaleString()}` : `Orders: ${ctx.raw}` } } },
+        plugins: { legend: { position: 'top', labels: { font: { size: 11, family: 'Fira Sans' }, boxWidth: 12 } }, tooltip: { callbacks: { label: ctx => ctx.datasetIndex===0 ? `Revenue: ₱${ctx.raw.toLocaleString()}` : `${ctx.dataset.label}: ${ctx.raw}` } } },
         scales: {
             x: { grid: { color: '#f1f5f9' }, ticks: { font: { size: 10 }, maxRotation: 45 } },
             y: { grid: { color: '#f1f5f9' }, ticks: { font: { size: 10 }, callback: v => '₱'+v.toLocaleString() } },
@@ -280,6 +282,7 @@ window.__ajaxFilterUpdate = async function (form, params, url) {
     window.__charts.revenue.data.labels = d.revenueChart.labels;
     window.__charts.revenue.data.datasets[0].data = d.revenueChart.revenue;
     window.__charts.revenue.data.datasets[1].data = d.revenueChart.orders;
+    window.__charts.revenue.data.datasets[2].data = d.revenueChart.placed;
     window.__charts.revenue.update();
 
     // Status chart

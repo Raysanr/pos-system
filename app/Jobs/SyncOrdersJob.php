@@ -35,10 +35,34 @@ class SyncOrdersJob implements ShouldQueue
         $shop = PancakeShop::findOrFail($this->shopModelId);
 
         // One sync per shop at a time — TTL slightly longer than job timeout.
-        $lock = Cache::lock("sync_orders_lock_{$shop->id}", 3700);
+        $lockKey = "sync_orders_lock_{$shop->id}";
+        $lock    = Cache::lock($lockKey, 3700);
         if (!$lock->get()) {
-            Log::info("SyncOrdersJob: shop {$shop->shop_id} already syncing, skipping.");
-            return;
+            // If the lock is older than the job timeout, the previous worker died without
+            // releasing it — force-release so this run can proceed instead of silently skipping.
+            $stale = SyncLog::where('shop_id', $shop->id)
+                ->where('type', 'orders')
+                ->where('status', 'running')
+                ->where('started_at', '<', now()->subSeconds($this->timeout + 60))
+                ->exists();
+
+            if ($stale) {
+                Log::warning("SyncOrdersJob: stale lock detected for shop {$shop->shop_id}, force-releasing.");
+                Cache::lock($lockKey)->forceRelease();
+                SyncLog::where('shop_id', $shop->id)
+                    ->where('type', 'orders')
+                    ->where('status', 'running')
+                    ->whereNull('finished_at')
+                    ->update(['status' => 'failed', 'error_message' => 'Stale lock — previous worker died.', 'finished_at' => now()]);
+                $lock = Cache::lock($lockKey, 3700);
+                if (!$lock->get()) {
+                    Log::error("SyncOrdersJob: could not acquire lock even after force-release for shop {$shop->shop_id}.");
+                    return;
+                }
+            } else {
+                Log::info("SyncOrdersJob: shop {$shop->shop_id} already syncing, skipping.");
+                return;
+            }
         }
 
         $log           = null;
@@ -136,9 +160,13 @@ class SyncOrdersJob implements ShouldQueue
         $now     = now()->format('Y-m-d H:i:s');
         $records = [];
 
+        $today = date('Y-m-d');
         foreach ($batch as $raw) {
             // Validate response — skip malformed records.
             if (empty($raw['id'])) continue;
+
+            // Skip orders with future inserted_at — bad data entered in Pancake POS.
+            if (isset($raw['inserted_at']) && date('Y-m-d', strtotime($raw['inserted_at'])) > $today) continue;
 
             $r               = $this->mapOrder($shopId, $raw);
             $r['items']      = isset($r['items'])    ? json_encode($r['items'])    : null;
@@ -175,6 +203,18 @@ class SyncOrdersJob implements ShouldQueue
         $cod     = (float) ($raw['cod']     ?? 0);
         $prepaid = (float) ($raw['prepaid'] ?? 0);
 
+        // Customer-level consultation notes (order_id == "") contain health info
+        // (age, condition, duration) written by agents during CVC/consult calls.
+        // These are separate from the order's operational note ("GEM - W/ UPSELL").
+        $orderNote    = $raw['note'] ?? null;
+        $consultParts = [];
+        foreach ($raw['customer']['notes'] ?? [] as $n) {
+            if (($n['order_id'] ?? null) === '' && !empty($n['message']) && empty($n['removed_at'])) {
+                $consultParts[] = $n['message'];
+            }
+        }
+        $combinedNote = trim(implode("\n", array_filter(array_merge([$orderNote], $consultParts)))) ?: null;
+
         return [
             'shop_id'             => $shopId,
             'pancake_id'          => (string) ($raw['id'] ?? ''),
@@ -202,10 +242,10 @@ class SyncOrdersJob implements ShouldQueue
             'is_returned'         => $status === 5,
             'is_cancelled'        => $status === 6,
             'is_wholesale'        => (bool) ($raw['is_exchange_order'] ?? false),
-            'extra_note'          => $raw['note'] ?? null,
+            'extra_note'          => $combinedNote,
             'return_reason'       => $raw['returned_reason_name'] ?? null,
-            'customer_age'        => DemographicsExtractor::age($raw['note'] ?? null),
-            'health_condition'    => ($c = DemographicsExtractor::conditions($raw['note'] ?? null)) ? json_encode($c) : null,
+            'customer_age'        => DemographicsExtractor::age($combinedNote),
+            'health_condition'    => ($c = DemographicsExtractor::conditions($combinedNote)) ? json_encode($c) : null,
             'items'               => $raw['items'] ?? null,
             'utm_data'            => array_filter([
                 'source'   => $raw['p_utm_source']   ?? null,
