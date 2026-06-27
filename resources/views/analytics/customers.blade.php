@@ -136,6 +136,65 @@ $retPct  = 100 - $newPct;
 
 </div>
 
+<!-- Age Groups + Health Conditions -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+
+    <div class="bg-white rounded-xl shadow-sm p-5" style="border:1px solid #DBEAFE;">
+        <h3 class="text-sm font-semibold mb-0.5" style="color:#1E293B;">Age Groups</h3>
+        <p class="text-xs mb-4" style="color:#94A3B8;">Distribution of customer ages (from order notes)</p>
+        @if(array_sum($ageGroups['data']) > 0)
+        <div class="chart-wrap" style="min-height:180px;">
+            <div class="chart-skeleton" id="sk-age-groups">
+                <div style="display:flex;align-items:flex-end;gap:10px;height:160px;padding-top:20px;">
+                    @foreach([40,60,80,70,50,30] as $h)
+                    <div class="sk-bar" style="flex:1;height:{{ $h }}%;"></div>
+                    @endforeach
+                </div>
+            </div>
+            <canvas id="ageGroupsChart" class="chart-canvas" height="180"></canvas>
+        </div>
+        @else
+        <div class="empty-state" style="min-height:160px;">
+            <div class="empty-state-icon">
+                <svg style="width:22px;height:22px;color:#94A3B8;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+                </svg>
+            </div>
+            <p class="title">No age data yet</p>
+            <p class="hint">Run <code style="font-family:'Fira Code',monospace;font-size:11px;background:#F1F5F9;padding:1px 4px;border-radius:3px;">app:extract-order-demographics</code> to extract age from notes.</p>
+        </div>
+        @endif
+    </div>
+
+    <div class="bg-white rounded-xl shadow-sm p-5" style="border:1px solid #DBEAFE;">
+        <h3 class="text-sm font-semibold mb-0.5" style="color:#1E293B;">Health Conditions</h3>
+        <p class="text-xs mb-4" style="color:#94A3B8;">Extracted from order notes</p>
+        @if(count($healthConditions['labels']) > 0)
+        <div class="chart-wrap" style="min-height:220px;">
+            <div class="chart-skeleton" id="sk-health">
+                <div style="display:flex;flex-direction:column;gap:10px;padding:4px 0;">
+                    @foreach([85,55,40,25] as $w)
+                    <div class="sk-bar" style="width:{{ $w }}%;height:22px;"></div>
+                    @endforeach
+                </div>
+            </div>
+            <canvas id="healthChart" class="chart-canvas" height="220"></canvas>
+        </div>
+        @else
+        <div class="empty-state" style="min-height:180px;">
+            <div class="empty-state-icon">
+                <svg style="width:22px;height:22px;color:#94A3B8;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                </svg>
+            </div>
+            <p class="title">No health conditions found</p>
+            <p class="hint">Run <code style="font-family:'Fira Code',monospace;font-size:11px;background:#F1F5F9;padding:1px 4px;border-radius:3px;">app:extract-order-demographics</code> to extract from notes.</p>
+        </div>
+        @endif
+    </div>
+
+</div>
+
 <!-- Customer Acquisition -->
 <div class="bg-white rounded-xl shadow-sm p-5 mb-4" style="border:1px solid #DBEAFE;">
     <h3 class="text-sm font-semibold mb-0.5" style="color:#1E293B;">Customer Acquisition by Month</h3>
@@ -402,15 +461,19 @@ $retPct  = 100 - $newPct;
 @push('scripts')
 <script id="gender-data"     type="application/json"><?php echo json_encode($genderStats); ?></script>
 <script id="age-data"        type="application/json"><?php echo json_encode($ageStats); ?></script>
+<script id="age-groups-data" type="application/json"><?php echo json_encode($ageGroups); ?></script>
+<script id="health-data"     type="application/json"><?php echo json_encode($healthConditions); ?></script>
 <script id="birthday-data"   type="application/json"><?php echo json_encode($birthdayMonth); ?></script>
 <script id="peak-days-data"  type="application/json"><?php echo json_encode($peakPatterns['days']); ?></script>
 <script id="peak-hours-data" type="application/json"><?php echo json_encode($peakPatterns['hours']); ?></script>
 <script id="basket-data"     type="application/json"><?php echo json_encode($basketSize['distribution']); ?></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
-const genderData   = JSON.parse(document.getElementById('gender-data').textContent);
-const ageData      = JSON.parse(document.getElementById('age-data').textContent);
-const birthdayData = JSON.parse(document.getElementById('birthday-data').textContent);
+const genderData     = JSON.parse(document.getElementById('gender-data').textContent);
+const ageData        = JSON.parse(document.getElementById('age-data').textContent);
+const ageGroupsData  = JSON.parse(document.getElementById('age-groups-data').textContent);
+const healthData     = JSON.parse(document.getElementById('health-data').textContent);
+const birthdayData   = JSON.parse(document.getElementById('birthday-data').textContent);
 
 function revealChart(canvasId, skeletonId) {
     const canvas = document.getElementById(canvasId);
@@ -469,6 +532,46 @@ window.__charts.birthday = new Chart(document.getElementById('birthdayChart'), {
     }
 });
 revealChart('birthdayChart', 'sk-acq');
+
+// Age Groups
+if (ageGroupsData.data.some(v => v > 0)) {
+    window.__charts.ageGroups = new Chart(document.getElementById('ageGroupsChart'), {
+        type: 'bar',
+        data: {
+            labels: ageGroupsData.labels,
+            datasets: [{ data: ageGroupsData.data, backgroundColor: GOLD, borderRadius: 6, borderSkipped: false }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${ctx.raw.toLocaleString()} customers` } } },
+            scales: {
+                x: { grid: { display: false }, ticks: { font: tickFont, color: tickColor } },
+                y: { grid: { color: gridColor }, ticks: { font: tickFont, color: tickColor }, beginAtZero: true }
+            }
+        }
+    });
+    revealChart('ageGroupsChart', 'sk-age-groups');
+}
+
+// Health Conditions
+if (healthData.labels.length > 0) {
+    window.__charts.health = new Chart(document.getElementById('healthChart'), {
+        type: 'bar',
+        data: {
+            labels: healthData.labels,
+            datasets: [{ data: healthData.data, backgroundColor: '#0F172A', borderRadius: 4, borderSkipped: false }]
+        },
+        options: {
+            indexAxis: 'y', responsive: true,
+            plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${ctx.raw.toLocaleString()} orders` } } },
+            scales: {
+                x: { grid: { color: gridColor }, ticks: { font: tickFont, color: tickColor }, beginAtZero: true },
+                y: { grid: { display: false }, ticks: { font: { size: 11, family: "'Fira Sans', sans-serif" }, color: '#374151' } }
+            }
+        }
+    });
+    revealChart('healthChart', 'sk-health');
+}
 
 const peakDaysData  = JSON.parse(document.getElementById('peak-days-data').textContent);
 const peakHoursData = JSON.parse(document.getElementById('peak-hours-data').textContent);
@@ -573,6 +676,20 @@ window.__ajaxFilterUpdate = async function (form, params, url) {
     window.__charts.age.data.labels = d.ageStats.labels;
     window.__charts.age.data.datasets[0].data = d.ageStats.data;
     window.__charts.age.update();
+
+    // Age Groups chart
+    if (window.__charts.ageGroups) {
+        window.__charts.ageGroups.data.labels = d.ageGroups.labels;
+        window.__charts.ageGroups.data.datasets[0].data = d.ageGroups.data;
+        window.__charts.ageGroups.update();
+    }
+
+    // Health Conditions chart
+    if (window.__charts.health) {
+        window.__charts.health.data.labels = d.healthConditions.labels;
+        window.__charts.health.data.datasets[0].data = d.healthConditions.data;
+        window.__charts.health.update();
+    }
 
     // Acquisition by Month chart
     window.__charts.birthday.data.labels = d.birthdayMonth.labels;

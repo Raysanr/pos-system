@@ -69,11 +69,13 @@ class MapAnalyticsController extends Controller
 
         if ($status !== 'all') {
             match ($status) {
-                'delivered' => $query->where('status', 'delivered'),
-                'rts'       => $query->where('is_rts', true),
-                'returned'  => $query->where('is_returned', true),
-                'cancelled' => $query->where('is_cancelled', true),
-                default     => null,
+                'shipped'    => $query->where('status', 'shipped'),
+                'delivered'  => $query->where('status', 'delivered'),
+                'returning'  => $query->where('status', 'returning'),
+                'returned'   => $query->where('is_returned', true),
+                'restocking' => $query->where('status', 'restocking'),
+                'cancelled'  => $query->where('is_cancelled', true),
+                default      => null,
             };
         }
 

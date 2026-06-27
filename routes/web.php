@@ -2,9 +2,11 @@
 
 use App\Http\Controllers\AnalyticsPulseController;
 use App\Http\Controllers\CustomerAnalyticsController;
+use App\Http\Controllers\CustomerLtvController;
+use App\Http\Controllers\ReturnReasonController;
+use App\Http\Controllers\SalesForecastController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\MapAnalyticsController;
-use App\Http\Controllers\ProductAudienceController;
 use App\Http\Controllers\RtsAnalyticsController;
 use App\Http\Controllers\SeasonalTrendController;
 use App\Http\Controllers\SettingsController;
@@ -22,11 +24,13 @@ Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard
 
 Route::prefix('analytics')->name('analytics.')->group(function () {
     Route::get('/customers',        [CustomerAnalyticsController::class,  'index'])->name('customers');
-    Route::get('/product-audience', [ProductAudienceController::class,   'index'])->name('product-audience');
     Route::get('/rts',              [RtsAnalyticsController::class,       'index'])->name('rts');
     Route::get('/map',              [MapAnalyticsController::class,       'index'])->name('map');
     Route::get('/map/data',         [MapAnalyticsController::class,       'index'])->name('map.data');
     Route::get('/seasonal',         [SeasonalTrendController::class,      'index'])->name('seasonal');
+    Route::get('/ltv',              [CustomerLtvController::class,        'index'])->name('ltv');
+    Route::get('/return-reasons',   [ReturnReasonController::class,       'index'])->name('return-reasons');
+    Route::get('/forecast',         [SalesForecastController::class,      'index'])->name('forecast');
     Route::get('/pulse',            [AnalyticsPulseController::class,     'pulse'])->name('pulse');
 });
 

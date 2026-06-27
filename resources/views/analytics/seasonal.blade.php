@@ -3,17 +3,12 @@
 @section('subtitle', 'Order patterns by day, week, and month — with Philippine calendar context')
 
 @section('header_actions')
-<div class="flex items-center gap-3">
-    <form method="GET" action="{{ route('analytics.seasonal') }}" class="flex items-center gap-2">
-        <select name="product_filter" onchange="this.form.submit()"
-                class="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium text-slate-700 cursor-pointer">
-            <option value="">All Products</option>
-            @foreach($products as $p)
-                <option value="{{ $p }}" {{ $productFilter === $p ? 'selected' : '' }}>{{ $p }}</option>
-            @endforeach
-        </select>
-    </form>
-</div>
+    @include('partials.filter-bar', [
+        'filterRoute'    => route('analytics.seasonal'),
+        'products'       => $products,
+        'productFilter'  => $productFilter,
+        'showDateFilter' => false,
+    ])
 @endsection
 
 @section('content')
@@ -72,54 +67,44 @@
 
 {{-- ── Activity Heatmap Calendar ────────────────────────────────────── --}}
 <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-5 mb-5">
-    <div class="flex items-center justify-between mb-4">
+    <div class="flex items-center justify-between mb-5">
         <div>
             <h3 class="text-sm font-semibold text-slate-800">Daily Order Activity</h3>
-            <p class="text-xs text-slate-400 mt-0.5">Each cell = 1 day · Darker = more orders · Hover for details</p>
+            <p class="text-xs text-slate-400 mt-0.5">Last 52 weeks · Each cell = 1 day · Hover for details</p>
         </div>
         <div class="flex items-center gap-2 text-xs text-slate-400">
-            <span>Less</span>
-            <div class="flex gap-0.5">
-                @foreach(['#f1f5f9','#bfdbfe','#93c5fd','#3b82f6','#1d4ed8'] as $c)
-                <div class="w-3 h-3 rounded-sm" style="background:{{ $c }}"></div>
+            <span>Low</span>
+            <div class="flex gap-1">
+                @foreach(['#e2e8f0','#bfdbfe','#93c5fd','#3b82f6','#1d4ed8'] as $c)
+                <div class="w-3.5 h-3.5 rounded" style="background:{{ $c }}"></div>
                 @endforeach
             </div>
-            <span>More</span>
+            <span>High</span>
         </div>
     </div>
 
-    <div id="heatmap-container" class="overflow-x-auto">
-        <div id="heatmap-grid" class="flex gap-1 min-w-max"></div>
+    <div class="overflow-x-auto pb-1">
+        <div id="heatmap-grid" style="display:flex;gap:3px;min-width:max-content;"></div>
     </div>
 
+    {{-- Tooltip --}}
     <div id="heatmap-tooltip"
-         class="fixed z-50 hidden bg-slate-800 text-white text-xs rounded-lg px-3 py-2 pointer-events-none shadow-xl"
-         style="min-width:160px"></div>
+         class="fixed z-[9999] hidden pointer-events-none"
+         style="min-width:180px;">
+        <div class="bg-slate-900 text-white text-xs rounded-xl px-3.5 py-2.5 shadow-2xl" style="border:1px solid #334155;">
+            <div id="heatmap-tt-content"></div>
+        </div>
+    </div>
 </div>
 
-{{-- ── Weekly Trend + Day of Week ───────────────────────────────────── --}}
-<div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
-
-    {{-- Weekly trend line --}}
-    <div class="lg:col-span-2 bg-white rounded-xl border border-slate-100 shadow-sm p-5">
-        <div class="mb-4">
-            <h3 class="text-sm font-semibold text-slate-800">Weekly Order Trend</h3>
-            <p class="text-xs text-slate-400 mt-0.5">Orders and delivered revenue per week · PH holidays marked</p>
-        </div>
-        <div class="chart-wrap" style="position:relative;height:240px;">
-            <canvas id="weeklyChart" class="chart-canvas"></canvas>
-        </div>
+{{-- ── Weekly Trend ─────────────────────────────────────────────────── --}}
+<div class="bg-white rounded-xl border border-slate-100 shadow-sm p-5 mb-5">
+    <div class="mb-4">
+        <h3 class="text-sm font-semibold text-slate-800">Weekly Order Trend</h3>
+        <p class="text-xs text-slate-400 mt-0.5">Orders and delivered revenue per week · PH holidays marked</p>
     </div>
-
-    {{-- Day of week --}}
-    <div class="bg-white rounded-xl border border-slate-100 shadow-sm p-5">
-        <div class="mb-4">
-            <h3 class="text-sm font-semibold text-slate-800">Best Day of Week</h3>
-            <p class="text-xs text-slate-400 mt-0.5">Average orders per day of week</p>
-        </div>
-        <div class="chart-wrap" style="position:relative;height:240px;">
-            <canvas id="dowChart" class="chart-canvas"></canvas>
-        </div>
+    <div class="chart-wrap" style="position:relative;height:260px;">
+        <canvas id="weeklyChart" class="chart-canvas"></canvas>
     </div>
 </div>
 
@@ -173,84 +158,129 @@ function fmt(v) {
 }
 
 // ── Heatmap Calendar ─────────────────────────────────────────────────────────
-(function buildHeatmap() {
-    if (!Object.keys(DAILY).length) return;
+try { (function buildHeatmap() {
+    const grid    = document.getElementById('heatmap-grid');
+    const ttWrap  = document.getElementById('heatmap-tooltip');
+    const ttBody  = document.getElementById('heatmap-tt-content');
+    if (!grid) return;
 
-    const dates    = Object.keys(DAILY).sort();
-    const firstDay = new Date(dates[0] + 'T00:00:00');
-    const lastDay  = new Date(dates[dates.length - 1] + 'T00:00:00');
+    const CELL = 14; // px
+    const GAP  = 3;  // px
+    const STEP = CELL + GAP;
 
-    // Start from Monday of the week containing firstDay
-    const start = new Date(firstDay);
-    const startDow = (start.getDay() + 6) % 7; // 0=Mon
-    start.setDate(start.getDate() - startDow);
+    const dayLabels  = ['Mon','','Wed','','Fri','','Sun'];
+    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-    const grid     = document.getElementById('heatmap-grid');
-    const tooltip  = document.getElementById('heatmap-tooltip');
-    const dayLabels = ['M','T','W','T','F','S','S'];
-    const monthFull = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    // Always show exactly last 52 weeks (Sun → Sat or Mon → Sun)
+    const today = new Date();
+    today.setHours(0,0,0,0);
 
-    let col = null, prevMonth = -1, weekCount = 0;
+    // Walk back to the Monday 52 weeks ago
+    const start = new Date(today);
+    const dow   = (start.getDay() + 6) % 7; // 0=Mon
+    start.setDate(start.getDate() - dow - 51 * 7);
 
-    // Day-of-week labels column
+    const localStr = d => {
+        return d.getFullYear() + '-'
+             + String(d.getMonth() + 1).padStart(2,'0') + '-'
+             + String(d.getDate()).padStart(2,'0');
+    };
+
+    // Build weeks array
+    const weeks = [];
+    const cur = new Date(start);
+    while (cur <= today) {
+        const week = [];
+        for (let i = 0; i < 7; i++) {
+            if (cur > today) { week.push(null); }
+            else             { week.push(new Date(cur)); }
+            cur.setDate(cur.getDate() + 1);
+        }
+        weeks.push(week);
+    }
+
+    // Month label row: one label per week column if month changed
+    const monthRow = document.createElement('div');
+    monthRow.style.cssText = `display:flex;gap:${GAP}px;margin-bottom:4px;padding-left:${STEP + 6}px;`;
+    let prevMo = -1;
+    weeks.forEach(week => {
+        const firstDay = week.find(d => d !== null);
+        const span = document.createElement('div');
+        span.style.cssText = `width:${CELL}px;flex-shrink:0;font-size:10px;color:#94a3b8;font-weight:500;white-space:nowrap;`;
+        if (firstDay && firstDay.getMonth() !== prevMo) {
+            span.textContent = monthNames[firstDay.getMonth()];
+            prevMo = firstDay.getMonth();
+        }
+        monthRow.appendChild(span);
+    });
+    grid.parentElement.insertBefore(monthRow, grid);
+
+    // Day-of-week label column
     const labelCol = document.createElement('div');
-    labelCol.className = 'flex flex-col gap-1 mr-1';
-    labelCol.innerHTML = `<div class="h-4"></div>` +
-        dayLabels.map(d => `<div class="w-3 h-3 text-xs text-slate-400 flex items-center justify-center">${d}</div>`).join('');
+    labelCol.style.cssText = `display:flex;flex-direction:column;gap:${GAP}px;margin-right:6px;flex-shrink:0;`;
+    dayLabels.forEach(l => {
+        const div = document.createElement('div');
+        div.style.cssText = `height:${CELL}px;font-size:9px;color:#94a3b8;display:flex;align-items:center;font-weight:500;`;
+        div.textContent = l;
+        labelCol.appendChild(div);
+    });
     grid.appendChild(labelCol);
 
-    const cur = new Date(start);
-    while (cur <= lastDay) {
-        const dow = (cur.getDay() + 6) % 7; // 0=Mon
+    // Week columns
+    weeks.forEach(week => {
+        const col = document.createElement('div');
+        col.style.cssText = `display:flex;flex-direction:column;gap:${GAP}px;flex-shrink:0;`;
 
-        if (dow === 0) {
-            col = document.createElement('div');
-            col.className = 'flex flex-col gap-1';
+        week.forEach((day, rowIdx) => {
+            const cell = document.createElement('div');
+            cell.style.cssText = `width:${CELL}px;height:${CELL}px;border-radius:3px;cursor:pointer;transition:transform 0.1s,outline 0.1s;flex-shrink:0;`;
 
-            // Month label
-            const month = cur.getMonth();
-            const label = document.createElement('div');
-            label.className = 'h-4 text-xs text-slate-400 whitespace-nowrap';
-            label.style.fontSize = '10px';
-            label.textContent = (month !== prevMonth) ? monthFull[month] : '';
-            prevMonth = month;
-            col.appendChild(label);
-            grid.appendChild(col);
-            weekCount++;
-        }
+            if (!day) {
+                cell.style.background = 'transparent';
+            } else {
+                const ds        = localStr(day);
+                const d         = DAILY[ds] || { orders: 0, delivered: 0, revenue: 0 };
+                const isHoliday = HOLIDAYS[ds];
+                cell.style.background = heatColor(d.orders);
+                if (isHoliday) {
+                    cell.style.outline = '2px solid #f59e0b';
+                    cell.style.outlineOffset = '-1px';
+                }
 
-        const dateStr = cur.toISOString().slice(0, 10);
-        const d = DAILY[dateStr] || { orders: 0, delivered: 0, revenue: 0 };
-        const isHoliday = HOLIDAYS[dateStr];
-        const isPast    = cur <= new Date();
-
-        const cell = document.createElement('div');
-        cell.className = 'w-3 h-3 rounded-sm cursor-pointer transition-transform hover:scale-125';
-        cell.style.background = isPast ? heatColor(d.orders) : '#f8fafc';
-        if (isHoliday) cell.style.outline = '1.5px solid #f59e0b';
-
-        cell.addEventListener('mouseenter', e => {
-            const delRate = d.orders > 0 ? Math.round(d.delivered / d.orders * 100) : 0;
-            tooltip.innerHTML = `
-                <div class="font-semibold mb-1">${dateStr}${isHoliday ? '<br><span style="color:#fbbf24">🎌 ' + isHoliday + '</span>' : ''}</div>
-                <div>${d.orders.toLocaleString()} orders</div>
-                <div style="color:#86efac">${d.delivered.toLocaleString()} delivered (${delRate}%)</div>
-                <div style="color:#6ee7b7">${fmt(d.revenue)}</div>`;
-            tooltip.classList.remove('hidden');
+                cell.addEventListener('mouseenter', e => {
+                    cell.style.transform = 'scale(1.3)';
+                    cell.style.zIndex    = '10';
+                    if (ttWrap && ttBody) {
+                        const delRate = d.orders > 0 ? Math.round(d.delivered / d.orders * 100) : 0;
+                        const dow2    = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][day.getDay()];
+                        ttBody.innerHTML =
+                            `<div style="font-weight:600;margin-bottom:6px;color:#e2e8f0;">${dow2}, ${ds}${isHoliday ? '<br><span style="color:#fbbf24;font-weight:400;">📅 ' + isHoliday + '</span>' : ''}</div>` +
+                            `<div style="display:flex;justify-content:space-between;gap:16px;"><span style="color:#94a3b8;">Orders</span><span style="font-weight:600;">${d.orders.toLocaleString()}</span></div>` +
+                            `<div style="display:flex;justify-content:space-between;gap:16px;"><span style="color:#94a3b8;">Delivered</span><span style="color:#86efac;font-weight:600;">${d.delivered.toLocaleString()} (${delRate}%)</span></div>` +
+                            `<div style="display:flex;justify-content:space-between;gap:16px;"><span style="color:#94a3b8;">Revenue</span><span style="color:#6ee7b7;font-weight:600;">${fmt(d.revenue)}</span></div>`;
+                        ttWrap.classList.remove('hidden');
+                    }
+                });
+                cell.addEventListener('mousemove', e => {
+                    if (ttWrap) {
+                        ttWrap.style.left = (e.clientX + 16) + 'px';
+                        ttWrap.style.top  = (e.clientY - 10) + 'px';
+                    }
+                });
+                cell.addEventListener('mouseleave', () => {
+                    cell.style.transform = '';
+                    cell.style.zIndex    = '';
+                    if (ttWrap) ttWrap.classList.add('hidden');
+                });
+            }
+            col.appendChild(cell);
         });
-        cell.addEventListener('mousemove', e => {
-            tooltip.style.left = (e.clientX + 14) + 'px';
-            tooltip.style.top  = (e.clientY - 8) + 'px';
-        });
-        cell.addEventListener('mouseleave', () => tooltip.classList.add('hidden'));
-
-        col.appendChild(cell);
-        cur.setDate(cur.getDate() + 1);
-    }
-})();
+        grid.appendChild(col);
+    });
+})(); } catch(e) { console.error('buildHeatmap:', e); }
 
 // ── Weekly Trend Chart ────────────────────────────────────────────────────────
-(function buildWeekly() {
+try { (function buildWeekly() {
     const ctx = document.getElementById('weeklyChart');
     if (!ctx || !WEEKLY.length) return;
 
@@ -327,10 +357,10 @@ function fmt(v) {
         }
     });
     ctx.classList.add('loaded');
-})();
+})(); } catch(e) { console.error('buildWeekly:', e); }
 
 // ── Day of Week Chart ─────────────────────────────────────────────────────────
-(function buildDow() {
+try { (function buildDow() {
     const ctx = document.getElementById('dowChart');
     if (!ctx) return;
 
@@ -364,10 +394,10 @@ function fmt(v) {
         }
     });
     ctx.classList.add('loaded');
-})();
+})(); } catch(e) { console.error('buildDow:', e); }
 
 // ── Day of Month (Payday Pattern) Chart ──────────────────────────────────────
-(function buildDom() {
+try { (function buildDom() {
     const ctx = document.getElementById('domChart');
     if (!ctx) return;
 
@@ -446,10 +476,10 @@ function fmt(v) {
         }
     });
     ctx.classList.add('loaded');
-})();
+})(); } catch(e) { console.error('buildDom:', e); }
 
 // ── Insights Generator ────────────────────────────────────────────────────────
-(function buildInsights() {
+try { (function buildInsights() {
     const el = document.getElementById('insights-grid');
     if (!el || !MONTHLY.length || !WEEKLY.length) return;
 
@@ -499,7 +529,7 @@ function fmt(v) {
                 icon: diff > 0 ? '📈' : '⚠️',
                 color: diff > 0 ? 'green' : 'red',
                 title: diff > 0 ? 'Delivery Rate Improving' : 'Delivery Rate Dropping',
-                body: `Your delivery rate is <strong>${diff > 0 ? '+' : ''}${diff}%</strong> over the last 2 weeks vs. the 2 weeks before. ${diff < 0 ? 'Investigate courier or provincial issues now.' : 'Keep up what's working.'}`
+                body: `Your delivery rate is <strong>${diff > 0 ? '+' : ''}${diff}%</strong> over the last 2 weeks vs. the 2 weeks before. ${diff < 0 ? 'Investigate courier or provincial issues now.' : "Keep up what's working."}`
             });
         }
     }
@@ -521,6 +551,6 @@ function fmt(v) {
             <p class="text-xs leading-relaxed">${ins.body}</p>
         </div>
     `).join('');
-})();
+})(); } catch(e) { console.error('buildInsights:', e); }
 </script>
 @endpush

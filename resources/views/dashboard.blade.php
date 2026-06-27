@@ -95,69 +95,6 @@
     </div>
 </div>
 
-<!-- Tables Row -->
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-    <div class="bg-white rounded-xl border border-blue-100 shadow-sm overflow-hidden">
-        <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-            <div>
-                <h3 class="text-sm font-semibold text-slate-800">Top Provinces</h3>
-                <p class="text-xs text-slate-400">By order volume</p>
-            </div>
-            <a href="{{ route('analytics.map') }}" class="text-xs text-blue-600 hover:text-blue-800 font-medium">View Map</a>
-        </div>
-        <table class="w-full">
-            <thead><tr>
-                <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50">Province</th>
-                <th class="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50">Orders</th>
-                <th class="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50">Revenue</th>
-            </tr></thead>
-            <tbody id="tbody-provinces">
-                @forelse($topProvinces as $prov)
-                <tr class="border-t border-slate-100 hover:bg-blue-50/40 transition-colors">
-                    <td class="px-4 py-3 text-sm text-slate-700">{{ $prov['province'] }}</td>
-                    <td class="px-4 py-3 text-sm text-slate-700 text-right font-mono">{{ number_format($prov['orders']) }}</td>
-                    <td class="px-4 py-3 text-sm text-slate-700 text-right font-mono">₱{{ number_format($prov['revenue']) }}</td>
-                </tr>
-                @empty
-                <tr><td colspan="3" class="px-4 py-8 text-center text-sm text-slate-400">No data yet. Sync your orders first.</td></tr>
-                @endforelse
-            </tbody>
-        </table>
-    </div>
-
-    <div class="bg-white rounded-xl border border-blue-100 shadow-sm overflow-hidden">
-        <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-            <div>
-                <h3 class="text-sm font-semibold text-slate-800">Courier Performance</h3>
-                <p class="text-xs text-slate-400">Orders vs RTS by courier</p>
-            </div>
-            <a href="{{ route('analytics.rts') }}" class="text-xs text-blue-600 hover:text-blue-800 font-medium">View RTS</a>
-        </div>
-        <table class="w-full">
-            <thead><tr>
-                <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50">Courier</th>
-                <th class="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50">Orders</th>
-                <th class="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50">RTS</th>
-                <th class="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-50">Rate</th>
-            </tr></thead>
-            <tbody id="tbody-couriers">
-                @forelse($topCouriers as $c)
-                @php $rtsRate = $c['orders'] > 0 ? round(($c['rts']/$c['orders'])*100,1) : 0; @endphp
-                <tr class="border-t border-slate-100 hover:bg-blue-50/40 transition-colors">
-                    <td class="px-4 py-3 text-sm text-slate-700">{{ $c['courier'] }}</td>
-                    <td class="px-4 py-3 text-sm text-slate-700 text-right font-mono">{{ number_format($c['orders']) }}</td>
-                    <td class="px-4 py-3 text-sm text-red-600 text-right font-mono">{{ number_format($c['rts']) }}</td>
-                    <td class="px-4 py-3 text-right">
-                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {{ $rtsRate > 20 ? 'bg-red-100 text-red-700' : ($rtsRate > 10 ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700') }}">{{ $rtsRate }}%</span>
-                    </td>
-                </tr>
-                @empty
-                <tr><td colspan="4" class="px-4 py-8 text-center text-sm text-slate-400">No data yet.</td></tr>
-                @endforelse
-            </tbody>
-        </table>
-    </div>
-</div>
 @endsection
 
 @push('scripts')
@@ -225,12 +162,26 @@ window.__charts.revenue = new Chart(document.getElementById('revenueChart'), {
 });
 
 // Status donut
-const statusColors = ['#1E40AF','#3B82F6','#10B981','#F59E0B','#EF4444','#8B5CF6','#EC4899','#6B7280'];
+const STATUS_COLOR_MAP = {
+    'returned':   '#EF4444',
+    'shipped':    '#0EA5E9',
+    'delivered':  '#10B981',
+    'pending':    '#F59E0B',
+    'cancelled':  '#6B7280',
+    'processing': '#8B5CF6',
+    'rts':        '#EC4899',
+    'returning':  '#F97316',
+};
+const STATUS_FALLBACK = ['#1E40AF','#3B82F6','#A855F7','#EC4899','#14B8A6'];
+function getStatusColor(label, idx) {
+    const key = label.toLowerCase().replace(/\s+/g, '_');
+    return STATUS_COLOR_MAP[key] || STATUS_FALLBACK[idx % STATUS_FALLBACK.length];
+}
 window.__charts.status = new Chart(document.getElementById('statusChart'), {
     type: 'doughnut',
     data: {
         labels: statusData.labels,
-        datasets: [{ data: statusData.data, backgroundColor: statusColors.slice(0, statusData.labels.length), borderWidth: 2, borderColor: '#fff', hoverOffset: 4 }]
+        datasets: [{ data: statusData.data, backgroundColor: statusData.labels.map((l, i) => getStatusColor(l, i)), borderWidth: 2, borderColor: '#fff', hoverOffset: 4 }]
     },
     options: {
         responsive: true,
@@ -288,6 +239,7 @@ window.__ajaxFilterUpdate = async function (form, params, url) {
     // Status chart
     window.__charts.status.data.labels = d.orderStatusChart.labels;
     window.__charts.status.data.datasets[0].data = d.orderStatusChart.data;
+    window.__charts.status.data.datasets[0].backgroundColor = d.orderStatusChart.labels.map((l, i) => getStatusColor(l, i));
     window.__charts.status.update();
 
     // Provinces table

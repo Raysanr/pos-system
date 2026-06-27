@@ -24,9 +24,9 @@
         <p class="text-xs font-semibold text-red-500 uppercase tracking-wider mb-2">RTS Rate</p>
         <p id="kpi-rts-rate" class="text-xl font-bold text-red-700 font-mono">{{ $rtsKpis['rts_rate'] }}%</p>
     </div>
-    <div class="bg-white rounded-xl border border-amber-100 p-4 shadow-sm">
-        <p class="text-xs font-semibold text-amber-600 uppercase tracking-wider mb-2">Returned</p>
-        <p id="kpi-returned" class="text-xl font-bold text-amber-700 font-mono">{{ number_format($rtsKpis['returned']) }}</p>
+    <div class="bg-white rounded-xl border border-red-100 p-4 shadow-sm">
+        <p class="text-xs font-semibold text-red-600 uppercase tracking-wider mb-2">Returned</p>
+        <p id="kpi-returned" class="text-xl font-bold text-red-600 font-mono">{{ number_format($rtsKpis['returned']) }}</p>
     </div>
     <div class="bg-white rounded-xl border border-slate-100 p-4 shadow-sm">
         <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Revenue Lost</p>

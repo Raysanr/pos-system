@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Jobs;
 
 use App\Models\Customer;
@@ -18,7 +19,14 @@ class SyncCustomersJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $timeout = 3600;
-    public int $tries   = 1; // resumable — no point retrying; dispatcher will re-queue
+    public int $tries   = 1;
+
+    // Process at most 200 pages per run so the job completes within the hour.
+    // On the next hourly run the cursor resumes from where this run left off.
+    private const MAX_PAGES_PER_RUN    = 200;
+    // Abort early when the API returns this many consecutive page failures —
+    // indicates an outage rather than a single stuck page.
+    private const MAX_CONSECUTIVE_FAILS = 3;
 
     public function __construct(private readonly int $shopModelId) {}
 
@@ -36,7 +44,7 @@ class SyncCustomersJob implements ShouldQueue
                 ->exists();
 
             if ($stale) {
-                Log::warning("SyncCustomersJob: stale lock detected for shop {$shop->shop_id}, force-releasing.");
+                Log::warning("SyncCustomersJob: stale lock for shop {$shop->shop_id}, force-releasing.");
                 Cache::lock($lockKey)->forceRelease();
                 SyncLog::where('shop_id', $shop->id)
                     ->where('type', 'customers')
@@ -45,20 +53,24 @@ class SyncCustomersJob implements ShouldQueue
                     ->update(['status' => 'failed', 'error_message' => 'Stale lock — previous worker died.', 'finished_at' => now()]);
                 $lock = Cache::lock($lockKey, 3700);
                 if (!$lock->get()) {
-                    Log::error("SyncCustomersJob: could not acquire lock even after force-release for shop {$shop->shop_id}.");
+                    Log::error("SyncCustomersJob: could not acquire lock after force-release for shop {$shop->shop_id}.");
                     return;
                 }
             } else {
-                Log::info("SyncCustomersJob: shop {$shop->shop_id} already syncing, skipping duplicate.");
+                Log::info("SyncCustomersJob: shop {$shop->shop_id} already syncing, skipping.");
                 return;
             }
         }
 
-        $log           = null;
-        $resumeKey     = 'sync_customers_page_' . $shop->id;
-        $startPage     = (int) Cache::get($resumeKey, 1);
-        $totalFetched  = 0;
-        $totalUpserted = 0;
+        $log              = null;
+        $resumeKey        = 'sync_customers_page_' . $shop->id;
+        $startPage        = (int) Cache::get($resumeKey, 1);
+        $totalFetched     = 0;
+        $totalUpserted    = 0;
+        $pagesProcessed   = 0;
+        $consecutiveFails = 0;
+        $skippedPages     = [];
+        $cycleComplete    = false;
 
         try {
             $log = SyncLog::create([
@@ -68,30 +80,78 @@ class SyncCustomersJob implements ShouldQueue
                 'started_at' => now(),
             ]);
 
-            $api = PancakeApiService::forShop($shop);
+            $api  = PancakeApiService::forShop($shop);
+            $page = $startPage;
 
-            foreach ($api->getAllCustomers(null, $startPage) as $page => $batch) {
-                $totalFetched  += count($batch);
-                $totalUpserted += $this->upsertBatch($shop->id, $batch);
+            while ($pagesProcessed < self::MAX_PAGES_PER_RUN) {
+                try {
+                    $result = $api->getCustomers($page);
+                    $batch  = $result['data'] ?? [];
 
-                Cache::put($resumeKey, $page + 1, now()->addDays(7));
+                    if (empty($batch)) {
+                        // No more pages — reached the end of the customer list.
+                        Cache::forget($resumeKey);
+                        $cycleComplete = true;
+                        break;
+                    }
+
+                    $totalFetched  += count($batch);
+                    $totalUpserted += $this->upsertBatch($shop->id, $batch);
+                    Cache::put($resumeKey, $page + 1, now()->addDays(7));
+                    $consecutiveFails = 0; // reset on success
+
+                    if (count($batch) < PancakeApiService::PER_PAGE) {
+                        Cache::forget($resumeKey);
+                        $cycleComplete = true;
+                        break;
+                    }
+
+                    $page++;
+                    $pagesProcessed++;
+                    usleep(200000); // 200 ms between pages
+                } catch (\Throwable $e) {
+                    $consecutiveFails++;
+                    $skippedPages[] = $page;
+                    Log::warning(
+                        "SyncCustomersJob: page {$page} failed (attempt {$consecutiveFails}): {$e->getMessage()}"
+                    );
+
+                    if ($consecutiveFails >= self::MAX_CONSECUTIVE_FAILS) {
+                        // API is likely down for this run — stop and resume from this page next time.
+                        Log::warning(
+                            "SyncCustomersJob: {$consecutiveFails} consecutive failures at page {$page}, aborting run."
+                        );
+                        break;
+                    }
+
+                    // Single stuck page — skip it and continue.
+                    $page++;
+                    $pagesProcessed++;
+                    Cache::put($resumeKey, $page, now()->addDays(7));
+                    usleep(1000000); // 1 s pause after a failure
+                }
             }
 
-            Cache::forget($resumeKey);
+            // Always update last_synced_at so the schedule doesn't re-dispatch immediately.
+            // A partial sync is still useful — we'll continue from the cursor next hour.
             $shop->update(['last_synced_at' => now()]);
+
+            $errorMsg = null;
+            if (!empty($skippedPages)) {
+                $errorMsg = 'Skipped pages: ' . implode(', ', $skippedPages);
+            } elseif ($pagesProcessed >= self::MAX_PAGES_PER_RUN && !$cycleComplete) {
+                $errorMsg = "Partial run: processed {$pagesProcessed} pages, resuming from page {$page} next run.";
+            }
 
             $log->update([
                 'status'           => 'success',
                 'records_fetched'  => $totalFetched,
                 'records_upserted' => $totalUpserted,
+                'error_message'    => $errorMsg,
                 'finished_at'      => now(),
             ]);
         } catch (\Throwable $e) {
-            $resumedTo = (int) Cache::get($resumeKey, $startPage);
-            Log::error(
-                "SyncCustomersJob failed for shop {$shop->shop_id} " .
-                "(next resume page={$resumedTo}): {$e->getMessage()}"
-            );
+            Log::error("SyncCustomersJob failed for shop {$shop->shop_id}: {$e->getMessage()}");
             $log?->update([
                 'status'           => 'failed',
                 'records_fetched'  => $totalFetched,
@@ -140,8 +200,6 @@ class SyncCustomersJob implements ShouldQueue
         $addr      = $raw['shop_customer_addresses'][0] ?? [];
         $addrParts = $this->parseAddressParts($addr['full_address'] ?? null);
 
-        // Prefer structured province/district/ward fields from Pancake if present;
-        // fall back to comma-parsing the full_address string only when they're absent.
         $province = $addr['province_name'] ?? $addr['city_name'] ?? $addrParts['province'];
         $district = $addr['district_name'] ?? $addrParts['district'];
         $ward     = $addr['commune_name']  ?? $addr['ward_name'] ?? $addrParts['ward'];

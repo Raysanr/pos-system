@@ -18,8 +18,9 @@
         'extraFilters'  => '
             <select name="status" class="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium text-slate-700 cursor-pointer">
                 <option value="all"       ' . ($status === 'all'       ? 'selected' : '') . '>All Orders</option>
+                <option value="shipped"   ' . ($status === 'shipped'   ? 'selected' : '') . '>Shipped</option>
                 <option value="delivered" ' . ($status === 'delivered' ? 'selected' : '') . '>Delivered</option>
-                <option value="rts"       ' . ($status === 'rts'       ? 'selected' : '') . '>RTS</option>
+                <option value="returning" ' . ($status === 'returning' ? 'selected' : '') . '>Returning</option>
                 <option value="returned"  ' . ($status === 'returned'  ? 'selected' : '') . '>Returned</option>
                 <option value="cancelled" ' . ($status === 'cancelled' ? 'selected' : '') . '>Cancelled</option>
             </select>

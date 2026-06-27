@@ -2,6 +2,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Customer;
+use App\Support\DemographicsExtractor;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -26,6 +27,8 @@ class CustomerAnalyticsController extends Controller
                 'totalCustomers'   => $newVsReturning['new'] + $newVsReturning['returning'],
                 'genderStats'      => $this->getGenderStats($shop->id, $dateFrom, $dateTo, $productFilter),
                 'ageStats'         => $this->getOrderFrequencyStats($shop->id, $dateFrom, $dateTo, $productFilter),
+                'ageGroups'        => $this->getAgeGroups($shop->id, $dateFrom, $dateTo, $productFilter),
+                'healthConditions' => $this->getHealthConditions($shop->id, $dateFrom, $dateTo, $productFilter),
                 'birthdayMonth'    => $this->getAcquisitionByMonthStats($shop->id, $dateFrom, $dateTo, $productFilter),
                 'topProvinces'     => $this->getTopProvinces($shop->id, $dateFrom, $dateTo, $productFilter),
                 'newVsReturning'   => $newVsReturning,
@@ -37,10 +40,12 @@ class CustomerAnalyticsController extends Controller
             ];
         });
 
-        $totalCustomers  = $cached['totalCustomers'];
-        $genderStats     = $cached['genderStats'];
-        $ageStats        = $cached['ageStats'];
-        $birthdayMonth   = $cached['birthdayMonth'];
+        $totalCustomers   = $cached['totalCustomers'];
+        $genderStats      = $cached['genderStats'];
+        $ageStats         = $cached['ageStats'];
+        $ageGroups        = $cached['ageGroups'];
+        $healthConditions = $cached['healthConditions'];
+        $birthdayMonth    = $cached['birthdayMonth'];
         $topProvinces    = $cached['topProvinces'];
         $newVsReturning  = $cached['newVsReturning'];
         $topCustomers    = $cached['topCustomers'];
@@ -60,9 +65,11 @@ class CustomerAnalyticsController extends Controller
                     'retPct'         => 100 - $newPct,
                     'basketAvg'      => $basketSize['avg'],
                 ],
-                'genderStats'     => $genderStats,
-                'ageStats'        => $ageStats,
-                'birthdayMonth'   => $birthdayMonth,
+                'genderStats'      => $genderStats,
+                'ageStats'         => $ageStats,
+                'ageGroups'        => $ageGroups,
+                'healthConditions' => $healthConditions,
+                'birthdayMonth'    => $birthdayMonth,
                 'peakDays'        => $peakPatterns['days'],
                 'peakHours'       => $peakPatterns['hours'],
                 'basketDist'      => $basketSize['distribution'],
@@ -74,7 +81,7 @@ class CustomerAnalyticsController extends Controller
         }
 
         return view('analytics.customers', compact(
-            'shop', 'totalCustomers', 'genderStats', 'ageStats',
+            'shop', 'totalCustomers', 'genderStats', 'ageStats', 'ageGroups', 'healthConditions',
             'birthdayMonth', 'topProvinces', 'newVsReturning', 'topCustomers',
             'peakPatterns', 'basketSize', 'productAffinity', 'firstProducts',
             'products', 'productFilter', 'dateFrom', 'dateTo', 'datePreset'
@@ -417,5 +424,110 @@ class CustomerAnalyticsController extends Controller
             fn($r) => ['product_name' => $r->product_name, 'first_buyers' => $r->first_buyers],
             DB::select($sql, [$shopId, $shopId])
         );
+    }
+
+    private function getAgeGroups(int $shopId, ?string $from, ?string $to, ?string $product): array
+    {
+        $q = DB::table('orders')
+            ->where('shop_id', $shopId)
+            ->whereNotNull('customer_age')
+            ->where('customer_age', '>', 0);
+        if ($from) $q->where('ordered_at', '>=', $from . ' 00:00:00');
+        $q->where('ordered_at', '<=', ($to ?? now()->format('Y-m-d')) . ' 23:59:59');
+        if ($product) {
+            $q->whereRaw(
+                "EXISTS (SELECT 1 FROM json_each(items) as item WHERE json_extract(item.value, '$.variation_info.name') = ? COLLATE NOCASE)",
+                [$product]
+            );
+        }
+
+        $rows = $q->selectRaw("
+                CASE
+                    WHEN customer_age < 40 THEN 'Under 40'
+                    WHEN customer_age < 50 THEN '40–49'
+                    WHEN customer_age < 60 THEN '50–59'
+                    WHEN customer_age < 70 THEN '60–69'
+                    WHEN customer_age < 80 THEN '70–79'
+                    ELSE '80+'
+                END as age_group,
+                COUNT(*) as cnt
+            ")
+            ->groupBy('age_group')
+            ->get()
+            ->keyBy('age_group');
+
+        $order = ['Under 40', '40–49', '50–59', '60–69', '70–79', '80+'];
+        return [
+            'labels' => $order,
+            'data'   => array_map(fn($l) => (int) ($rows[$l]->cnt ?? 0), $order),
+        ];
+    }
+
+    private function getHealthConditions(int $shopId, ?string $from, ?string $to, ?string $product): array
+    {
+        $bindings = [$shopId];
+        $productWhere = '';
+        if ($product) {
+            $productWhere = "AND EXISTS (SELECT 1 FROM json_each(o.items) AS item WHERE json_extract(item.value, '$.variation_info.name') = ? COLLATE NOCASE)";
+            $bindings[] = $product;
+        }
+        $dateWhere = '';
+        if ($from) { $dateWhere .= " AND o.ordered_at >= ?"; $bindings[] = $from . ' 00:00:00'; }
+        $dateWhere .= " AND o.ordered_at <= ?"; $bindings[] = ($to ?? now()->format('Y-m-d')) . ' 23:59:59';
+
+        $rows = DB::select("
+            SELECT je.value AS condition, COUNT(*) AS cnt
+            FROM orders o, json_each(o.health_condition) AS je
+            WHERE o.shop_id = ?
+              AND o.health_condition IS NOT NULL
+              AND o.health_condition LIKE '[%'
+              {$productWhere}
+              {$dateWhere}
+            GROUP BY je.value
+        ", $bindings);
+
+        $counts = [];
+        foreach ($rows as $r) {
+            $counts[$r->condition] = (int) $r->cnt;
+        }
+
+        $q = DB::table('orders as o')
+            ->where('o.shop_id', $shopId)
+            ->whereNotNull('o.extra_note')
+            ->where(function ($q) {
+                $q->whereNull('o.health_condition')
+                  ->orWhereRaw("o.health_condition NOT LIKE '[%'");
+            });
+        if ($product) {
+            $q->whereRaw(
+                "EXISTS (SELECT 1 FROM json_each(o.items) AS item WHERE json_extract(item.value, '$.variation_info.name') = ? COLLATE NOCASE)",
+                [$product]
+            );
+        }
+        if ($from) $q->where('o.ordered_at', '>=', $from . ' 00:00:00');
+        $q->where('o.ordered_at', '<=', ($to ?? now()->format('Y-m-d')) . ' 23:59:59');
+
+        $scanned = 0;
+        $q->select('o.id', 'o.extra_note')->orderBy('o.id')->chunk(500, function ($orders) use (&$counts, &$scanned) {
+            foreach ($orders as $order) {
+                foreach (DemographicsExtractor::conditions($order->extra_note) as $cond) {
+                    $counts[$cond] = ($counts[$cond] ?? 0) + 1;
+                }
+            }
+            $scanned += $orders->count();
+            if ($scanned >= 5000) return false;
+        });
+
+        if ($product) {
+            $category = DemographicsExtractor::categoryForProduct($product);
+            $allowed  = DemographicsExtractor::labelsForCategory($category);
+            if ($allowed !== null) {
+                $counts = array_intersect_key($counts, array_flip($allowed));
+            }
+        }
+
+        arsort($counts);
+        $top = array_slice($counts, 0, 12, true);
+        return ['labels' => array_keys($top), 'data' => array_values($top)];
     }
 }

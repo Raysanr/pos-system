@@ -85,6 +85,14 @@ abstract class Controller
 
     protected function bustShopCache(int $shopId): void
     {
+        // Debounce: skip if we already busted within the last 5 minutes.
+        // Without this, high-frequency webhooks during delivery hours keep the
+        // 30-minute cache perpetually cold.
+        $debounceKey = "shop_bust_lock_{$shopId}";
+        if (Cache::has($debounceKey)) {
+            return;
+        }
+        Cache::put($debounceKey, true, now()->addMinutes(5));
         Cache::put("shop_bust_{$shopId}", time(), now()->addDays(30));
     }
 

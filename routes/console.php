@@ -6,14 +6,16 @@ use App\Jobs\SyncOrdersJob;
 use App\Models\PancakeShop;
 use Illuminate\Support\Facades\Schedule;
 
-// ── Hourly full sync ───────────────────────────────────────────────────────────
-// Resumes from its cursor page; sets last_synced_at when all pages are done.
+// ── Hourly rolling sync ────────────────────────────────────────────────────────
+// Orders: only the last 30 days (228 pages vs 2,244 total). Status changes on
+// older orders are already handled by RefreshOpenOrdersJob every 2 hours.
+// Customers: paginated in 200-page chunks; job handles per-page failures itself.
 Schedule::call(function () {
     PancakeShop::where('is_active', true)->each(function ($shop) {
         $hoursAgo = now()->subHours($shop->sync_interval_hours);
         if (!$shop->last_synced_at || $shop->last_synced_at->lt($hoursAgo)) {
             SyncCustomersJob::dispatch($shop->id);
-            SyncOrdersJob::dispatch($shop->id);
+            SyncOrdersJob::dispatch($shop->id, now()->subDays(30)->format('Y-m-d H:i:s'));
         }
     });
 })->hourly()->name('pancake-full-sync')->withoutOverlapping();

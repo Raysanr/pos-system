@@ -66,7 +66,9 @@ class SeasonalTrendController extends Controller
                    SUM(CASE WHEN o.status='delivered' THEN 1 ELSE 0 END) as delivered,
                    SUM(CASE WHEN o.status='delivered' THEN o.total_price ELSE 0 END) as revenue
             FROM orders o
-            WHERE o.shop_id = ? AND o.ordered_at IS NOT NULL AND o.ordered_at <= date('now')
+            WHERE o.shop_id = ? AND o.ordered_at IS NOT NULL
+              AND o.ordered_at >= date('now', '-364 days')
+              AND o.ordered_at <= date('now', '+1 day')
             {$productClause}
             GROUP BY day ORDER BY day
         ", $params);

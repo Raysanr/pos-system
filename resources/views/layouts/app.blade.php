@@ -134,6 +134,77 @@
             pointer-events: none;
             transition: opacity 0.2s ease;
         }
+
+        /* ── Dual-calendar date range picker ───────────────────────────── */
+        .cal-nav-btn {
+            width: 28px; height: 28px;
+            display: inline-flex; align-items: center; justify-content: center;
+            border: none; border-radius: 6px; background: transparent;
+            color: #9CA3AF; cursor: pointer; font-size: 15px; font-weight: 500;
+            transition: background 0.1s, color 0.1s; line-height: 1;
+        }
+        .cal-nav-btn:hover { background: #F3F4F6; color: #374151; }
+        .cal-dh { text-align: center; font-size: 11px; font-weight: 500; color: #94A3B8; padding: 4px 0; }
+        /* Cell wrapper carries the range-pill background */
+        .cal-cell { display: flex; align-items: center; justify-content: center; height: 38px; }
+        .cal-cell.in-range  { background: #DBEAFE; }
+        .cal-cell.row-cap-l { border-top-left-radius: 50px; border-bottom-left-radius: 50px; }
+        .cal-cell.row-cap-r { border-top-right-radius: 50px; border-bottom-right-radius: 50px; }
+        /* Circular day button */
+        .cal-btn {
+            width: 30px; height: 30px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            border: none; background: transparent; cursor: pointer;
+            font-size: 13px; font-weight: 400; color: #374151;
+            position: relative; z-index: 1; flex-shrink: 0;
+            transition: background 0.1s, color 0.1s;
+        }
+        .cal-btn:not(.cal-btn-other):not(.cal-btn-sel):hover { background: rgba(37,99,235,0.12); color: #1D4ED8; }
+        .cal-btn-sel   { background: #2563EB !important; color: #fff !important; font-weight: 700; }
+        .cal-btn-today { border: 1.5px solid #2563EB !important; color: #2563EB; font-weight: 600; }
+        .cal-btn-other { color: #CBD5E1; pointer-events: none; cursor: default; font-size: 12px; }
+
+        /* ── Icon-only filter toolbar ──────────────────────────────────── */
+        .filter-icon-btn {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            border: none;
+            background: transparent;
+            color: #64748B;
+            cursor: pointer;
+            transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+            flex-shrink: 0;
+        }
+        .filter-icon-btn:hover {
+            background: #F1F5F9;
+            color: #1E40AF;
+        }
+        .filter-icon-btn:active {
+            background: #E2E8F0;
+        }
+        .filter-icon-btn--active {
+            background: rgba(245,166,35,0.10);
+            color: #D97706;
+        }
+        .filter-icon-btn--active:hover {
+            background: rgba(245,166,35,0.18);
+            color: #B45309;
+        }
+        .filter-icon-btn--apply {
+            background: #0F172A;
+            color: #F5A623;
+        }
+        .filter-icon-btn--apply:hover {
+            background: #1E293B;
+            color: #F5A623;
+            box-shadow: 0 0 0 2px rgba(245,166,35,0.25);
+        }
+        [x-cloak] { display: none !important; }
     </style>
     @stack('head')
 </head>
@@ -187,15 +258,6 @@
                 Customer Analytics
             </a>
 
-            <a href="{{ route('analytics.product-audience') }}"
-               class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150"
-               style="{{ request()->routeIs('analytics.product-audience') ? 'background:#F5A623; color:#0F172A;' : 'color:#94A3B8;' }}"
-               onmouseover="{{ request()->routeIs('analytics.product-audience') ? '' : "this.style.background='rgba(245,166,35,0.1)';this.style.color='#F5A623';" }}"
-               onmouseout="{{ request()->routeIs('analytics.product-audience') ? '' : "this.style.background='';this.style.color='#94A3B8';" }}">
-                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
-                Product Audience
-            </a>
-
 
             <a href="{{ route('analytics.map') }}"
                class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150"
@@ -213,6 +275,33 @@
                onmouseout="{{ request()->routeIs('analytics.seasonal') ? '' : "this.style.background='';this.style.color='#94A3B8';" }}">
                 <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
                 Seasonal Trends
+            </a>
+
+            <a href="{{ route('analytics.ltv') }}"
+               class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150"
+               style="{{ request()->routeIs('analytics.ltv') ? 'background:#F5A623; color:#0F172A;' : 'color:#94A3B8;' }}"
+               onmouseover="{{ request()->routeIs('analytics.ltv') ? '' : "this.style.background='rgba(245,166,35,0.1)';this.style.color='#F5A623';" }}"
+               onmouseout="{{ request()->routeIs('analytics.ltv') ? '' : "this.style.background='';this.style.color='#94A3B8';" }}">
+                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                Product Comparison
+            </a>
+
+            <a href="{{ route('analytics.return-reasons') }}"
+               class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150"
+               style="{{ request()->routeIs('analytics.return-reasons') ? 'background:#F5A623; color:#0F172A;' : 'color:#94A3B8;' }}"
+               onmouseover="{{ request()->routeIs('analytics.return-reasons') ? '' : "this.style.background='rgba(245,166,35,0.1)';this.style.color='#F5A623';" }}"
+               onmouseout="{{ request()->routeIs('analytics.return-reasons') ? '' : "this.style.background='';this.style.color='#94A3B8';" }}">
+                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
+                Return Reasons
+            </a>
+
+            <a href="{{ route('analytics.forecast') }}"
+               class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150"
+               style="{{ request()->routeIs('analytics.forecast') ? 'background:#F5A623; color:#0F172A;' : 'color:#94A3B8;' }}"
+               onmouseover="{{ request()->routeIs('analytics.forecast') ? '' : "this.style.background='rgba(245,166,35,0.1)';this.style.color='#F5A623';" }}"
+               onmouseout="{{ request()->routeIs('analytics.forecast') ? '' : "this.style.background='';this.style.color='#94A3B8';" }}">
+                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
+                Sales Forecast
             </a>
 
             <p class="px-3 mt-4 mb-2 text-xs font-semibold uppercase tracking-widest" style="color:#475569;">System</p>
@@ -266,12 +355,10 @@
                 @if(isset($activeShop) && $activeShop || auth()->user()->shops()->where('is_active', true)->exists())
                 <form method="POST" action="{{ route('settings.sync') }}">
                     @csrf
-                    <button type="submit" class="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors cursor-pointer"
-                            style="background:#0F172A; color:#F5A623; border-color:#0F172A;"
-                            onmouseover="this.style.background='#1E293B';"
-                            onmouseout="this.style.background='#0F172A';">
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-                        Sync Now
+                    <button type="submit"
+                            class="filter-icon-btn"
+                            aria-label="Sync Now" title="Sync Now">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                     </button>
                 </form>
                 @endif
