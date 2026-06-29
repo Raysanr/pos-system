@@ -4,10 +4,12 @@
 
 @section('header_actions')
     @include('partials.filter-bar', [
-        'filterRoute'    => route('analytics.seasonal'),
-        'products'       => $products,
-        'productFilter'  => $productFilter,
-        'showDateFilter' => false,
+        'filterRoute'   => route('analytics.seasonal'),
+        'products'      => $products,
+        'productFilter' => $productFilter,
+        'dateFrom'      => $dateFrom,
+        'dateTo'        => $dateTo,
+        'datePreset'    => $datePreset,
     ])
 @endsection
 
@@ -91,7 +93,7 @@
     <div id="heatmap-tooltip"
          class="fixed z-[9999] hidden pointer-events-none"
          style="min-width:180px;">
-        <div class="bg-slate-900 text-white text-xs rounded-xl px-3.5 py-2.5 shadow-2xl" style="border:1px solid #334155;">
+        <div style="background:#0f172a;color:#f1f5f9;font-size:12px;border-radius:12px;padding:10px 14px;border:1px solid #334155;box-shadow:0 10px 25px rgba(0,0,0,0.5);">
             <div id="heatmap-tt-content"></div>
         </div>
     </div>
@@ -255,7 +257,7 @@ try { (function buildHeatmap() {
                         const dow2    = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][day.getDay()];
                         ttBody.innerHTML =
                             `<div style="font-weight:600;margin-bottom:6px;color:#e2e8f0;">${dow2}, ${ds}${isHoliday ? '<br><span style="color:#fbbf24;font-weight:400;">📅 ' + isHoliday + '</span>' : ''}</div>` +
-                            `<div style="display:flex;justify-content:space-between;gap:16px;"><span style="color:#94a3b8;">Orders</span><span style="font-weight:600;">${d.orders.toLocaleString()}</span></div>` +
+                            `<div style="display:flex;justify-content:space-between;gap:16px;"><span style="color:#94a3b8;">Orders</span><span style="color:#f1f5f9;font-weight:600;">${d.orders.toLocaleString()}</span></div>` +
                             `<div style="display:flex;justify-content:space-between;gap:16px;"><span style="color:#94a3b8;">Delivered</span><span style="color:#86efac;font-weight:600;">${d.delivered.toLocaleString()} (${delRate}%)</span></div>` +
                             `<div style="display:flex;justify-content:space-between;gap:16px;"><span style="color:#94a3b8;">Revenue</span><span style="color:#6ee7b7;font-weight:600;">${fmt(d.revenue)}</span></div>`;
                         ttWrap.classList.remove('hidden');

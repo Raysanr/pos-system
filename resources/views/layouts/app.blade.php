@@ -505,7 +505,10 @@ function hideFilterLoading() {
 
     document.addEventListener('submit', function (e) {
         if (!e.target.classList.contains('filter-form')) return;
-        if (typeof window.__ajaxFilterUpdate !== 'function') return;
+        if (typeof window.__ajaxFilterUpdate !== 'function') {
+            showFilterLoading();
+            return; // let the browser do a normal full-page reload
+        }
 
         e.preventDefault();
 
@@ -566,6 +569,16 @@ function hideFilterLoading() {
                 if (thisGen !== gen) return;
                 hideFilterLoading();
             });
+    });
+})();
+
+// ── Page-navigation loading (sidebar links) ───────────────────────────────────
+(function () {
+    var bar = document.getElementById('filter-progress-bar');
+    document.querySelectorAll('aside a').forEach(function (link) {
+        link.addEventListener('click', function () {
+            if (bar) bar.style.display = 'block';
+        });
     });
 })();
 

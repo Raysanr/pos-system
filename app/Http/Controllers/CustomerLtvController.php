@@ -9,26 +9,34 @@ class CustomerLtvController extends Controller
 {
     public function index(Request $request)
     {
-        $shop = $this->user()->shops()->where('is_active', true)->firstOrFail();
+        $shop       = $this->user()->shops()->where('is_active', true)->firstOrFail();
+        $dateFrom   = $request->input('date_from') ?: null;
+        $dateTo     = $request->input('date_to')   ?: null;
+        $datePreset = $this->detectDatePreset($dateFrom, $dateTo);
+        $products   = $this->getProducts($shop->id);
 
-        $cacheKey = "product_comparison_{$shop->id}_{$this->shopCacheBust($shop->id)}";
-        $raw = Cache::remember($cacheKey, 1800, function () use ($shop) {
+        $cacheKey = "product_comparison_{$shop->id}_{$this->shopCacheBust($shop->id)}_" . md5((string)$dateFrom.(string)$dateTo);
+        $raw = Cache::remember($cacheKey, 1800, function () use ($shop, $dateFrom, $dateTo) {
             return [
-                'productLtv'   => $this->getProductLtv($shop->id),
-                'cohortLtv'    => $this->getCohortLtv($shop->id),
-                'monthlyTrend' => $this->getMonthlyTrend($shop->id),
-                'rtsData'      => $this->getNewCustomerRts($shop->id),
+                'productLtv'   => $this->getProductLtv($shop->id, $dateFrom, $dateTo),
+                'cohortLtv'    => $this->getCohortLtv($shop->id, $dateFrom, $dateTo),
+                'monthlyTrend' => $this->getMonthlyTrend($shop->id, $dateFrom, $dateTo),
+                'rtsData'      => $this->getNewCustomerRts($shop->id, $dateFrom, $dateTo),
             ];
         });
 
-        // Last 12 months oldest → newest
-        $months = [];
-        for ($i = 11; $i >= 0; $i--) {
-            $months[] = now()->subMonths($i)->format('Y-m');
-        }
-        $lastMonth      = now()->subMonth()->format('Y-m');
-        $prevMonth      = now()->subMonths(2)->format('Y-m');
-        $lastMonthLabel = now()->subMonth()->format('M Y');
+        // Build month list: use date range if provided, else last 12 months
+        $monthFrom = $dateFrom ? substr($dateFrom, 0, 7) : now()->subMonths(11)->format('Y-m');
+        $monthTo   = $dateTo   ? substr($dateTo,   0, 7) : now()->format('Y-m');
+        $months    = [];
+        $cur = new \DateTime($monthFrom . '-01');
+        $end = new \DateTime($monthTo   . '-01');
+        while ($cur <= $end) { $months[] = $cur->format('Y-m'); $cur->modify('+1 month'); }
+        if (empty($months)) { $months = [now()->format('Y-m')]; }
+
+        $lastMonth      = end($months);
+        $prevMonth      = count($months) > 1 ? $months[count($months) - 2] : now()->subMonths(2)->format('Y-m');
+        $lastMonthLabel = \DateTime::createFromFormat('Y-m', $lastMonth)->format('M Y');
 
         // Index acquisition data by product
         $monthlyByProduct = [];
@@ -76,17 +84,29 @@ class CustomerLtvController extends Controller
         return view('analytics.ltv', compact(
             'shop', 'months', 'lastMonthLabel', 'productData', 'cohortLtv',
             'maxLtv', 'overallAvgLtv', 'totalCustomers',
-            'bestRepeat', 'totalLastMonth', 'lowestRts'
+            'bestRepeat', 'totalLastMonth', 'lowestRts',
+            'products', 'dateFrom', 'dateTo', 'datePreset'
         ));
     }
 
-    private function getProductLtv(int $shopId): array
+    private function dateClause(?string $from, ?string $to, array &$params): string
     {
+        $clause = '';
+        if ($from) { $params[] = $from; $clause .= ' AND date(ordered_at) >= ?'; }
+        if ($to)   { $params[] = $to;   $clause .= ' AND date(ordered_at) <= ?'; }
+        return $clause;
+    }
+
+    private function getProductLtv(int $shopId, ?string $from = null, ?string $to = null): array
+    {
+        $params = [$shopId];
+        $dc = $this->dateClause($from, $to, $params);
+
         $sql = "
             WITH customer_first AS (
                 SELECT customer_pancake_id, MIN(ordered_at) AS first_at
                 FROM orders
-                WHERE shop_id = ? AND customer_pancake_id IS NOT NULL AND ordered_at IS NOT NULL
+                WHERE shop_id = ? AND customer_pancake_id IS NOT NULL AND ordered_at IS NOT NULL{$dc}
                 GROUP BY customer_pancake_id
             ),
             customer_entry AS (
@@ -129,7 +149,9 @@ class CustomerLtvController extends Controller
             ORDER BY avg_ltv DESC
         ";
 
-        $rows = DB::select($sql, [$shopId, $shopId, $shopId]);
+        $params[] = $shopId; // customer_entry join
+        $params[] = $shopId; // customer_totals
+        $rows = DB::select($sql, $params);
         return array_map(fn($r) => [
             'product'         => $r->product,
             'customer_count'  => (int)   $r->customer_count,
@@ -142,13 +164,16 @@ class CustomerLtvController extends Controller
         ], $rows);
     }
 
-    private function getCohortLtv(int $shopId): array
+    private function getCohortLtv(int $shopId, ?string $from = null, ?string $to = null): array
     {
+        $params = [$shopId];
+        $dc = $this->dateClause($from, $to, $params);
+
         $sql = "
             WITH customer_first AS (
                 SELECT customer_pancake_id, MIN(ordered_at) AS first_at
                 FROM orders
-                WHERE shop_id = ? AND customer_pancake_id IS NOT NULL AND ordered_at IS NOT NULL
+                WHERE shop_id = ? AND customer_pancake_id IS NOT NULL AND ordered_at IS NOT NULL{$dc}
                 GROUP BY customer_pancake_id
             ),
             customer_entry AS (
@@ -188,10 +213,11 @@ class CustomerLtvController extends Controller
             GROUP BY entry_product
             HAVING customer_count >= 10
             ORDER BY ltv_180 DESC
-            LIMIT 6
         ";
 
-        $rows = DB::select($sql, [$shopId, $shopId, $shopId]);
+        $params[] = $shopId; // customer_entry join
+        $params[] = $shopId; // customer_period join
+        $rows = DB::select($sql, $params);
         return array_map(fn($r) => [
             'product'        => $r->product,
             'customer_count' => (int)   $r->customer_count,
@@ -204,13 +230,20 @@ class CustomerLtvController extends Controller
         ], $rows);
     }
 
-    private function getMonthlyTrend(int $shopId): array
+    private function getMonthlyTrend(int $shopId, ?string $from = null, ?string $to = null): array
     {
+        $params = [$shopId];
+        $dc = $this->dateClause($from, $to, $params);
+
+        $monthFilter = $from
+            ? "month >= '" . substr($from, 0, 7) . "' AND month <= '" . substr($to ?? date('Y-m-d'), 0, 7) . "'"
+            : "month >= strftime('%Y-%m', date('now', '-11 months'))";
+
         $sql = "
             WITH customer_first AS (
                 SELECT customer_pancake_id, MIN(ordered_at) AS first_at
                 FROM orders
-                WHERE shop_id = ? AND customer_pancake_id IS NOT NULL AND ordered_at IS NOT NULL
+                WHERE shop_id = ? AND customer_pancake_id IS NOT NULL AND ordered_at IS NOT NULL{$dc}
                 GROUP BY customer_pancake_id
             ),
             customer_entry AS (
@@ -229,12 +262,13 @@ class CustomerLtvController extends Controller
                    month,
                    COUNT(*) AS new_customers
             FROM customer_entry
-            WHERE month >= strftime('%Y-%m', date('now', '-11 months'))
+            WHERE {$monthFilter}
             GROUP BY entry_product, month
             ORDER BY entry_product, month
         ";
 
-        $rows = DB::select($sql, [$shopId, $shopId]);
+        $params[] = $shopId; // customer_entry join
+        $rows = DB::select($sql, $params);
         return array_map(fn($r) => [
             'product'       => $r->product,
             'month'         => $r->month,
@@ -242,13 +276,16 @@ class CustomerLtvController extends Controller
         ], $rows);
     }
 
-    private function getNewCustomerRts(int $shopId): array
+    private function getNewCustomerRts(int $shopId, ?string $from = null, ?string $to = null): array
     {
+        $params = [$shopId];
+        $dc = $this->dateClause($from, $to, $params);
+
         $sql = "
             WITH customer_first AS (
                 SELECT customer_pancake_id, MIN(ordered_at) AS first_at
                 FROM orders
-                WHERE shop_id = ? AND customer_pancake_id IS NOT NULL AND ordered_at IS NOT NULL
+                WHERE shop_id = ? AND customer_pancake_id IS NOT NULL AND ordered_at IS NOT NULL{$dc}
                 GROUP BY customer_pancake_id
             ),
             customer_entry AS (
@@ -275,7 +312,8 @@ class CustomerLtvController extends Controller
             HAVING total_new_customers >= 3
         ";
 
-        $rows = DB::select($sql, [$shopId, $shopId]);
+        $params[] = $shopId; // customer_entry join
+        $rows = DB::select($sql, $params);
         return array_map(fn($r) => [
             'product'             => $r->product,
             'total_new_customers' => (int)   $r->total_new_customers,

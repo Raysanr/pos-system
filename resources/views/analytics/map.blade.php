@@ -271,6 +271,8 @@ async function setLevel(level) {
 async function loadData() {
     if (isLoading) return;
     isLoading = true;
+    var bar = document.getElementById('filter-progress-bar');
+    if (bar) bar.style.display = 'block';
     document.getElementById('rankings-tbody').innerHTML =
         '<tr><td colspan="4" class="px-4 py-8 text-center text-sm text-slate-400">Loading…</td></tr>';
 
@@ -291,6 +293,7 @@ async function loadData() {
     updateLevelUI();
     fitToData();
     isLoading = false;
+    if (bar) bar.style.display = 'none';
 }
 
 function fitToData() {

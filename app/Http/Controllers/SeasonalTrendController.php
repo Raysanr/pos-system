@@ -31,20 +31,23 @@ class SeasonalTrendController extends Controller
     {
         $shop          = $this->user()->shops()->where('is_active', true)->firstOrFail();
         $productFilter = $request->input('product_filter') ?: null;
+        $dateFrom      = $request->input('date_from')      ?: null;
+        $dateTo        = $request->input('date_to')        ?: null;
+        $datePreset    = $this->detectDatePreset($dateFrom, $dateTo);
         $products      = $this->getProducts($shop->id);
 
-        $cacheKey = 'seasonal_' . $shop->id . '_' . $this->shopCacheBust($shop->id) . '_' . md5((string) $productFilter);
-        $data = Cache::remember($cacheKey, 1800, function () use ($shop, $productFilter) {
+        $cacheKey = 'seasonal_' . $shop->id . '_' . $this->shopCacheBust($shop->id) . '_' . md5((string) $productFilter . (string) $dateFrom . (string) $dateTo);
+        $data = Cache::remember($cacheKey, 1800, function () use ($shop, $productFilter, $dateFrom, $dateTo) {
             return [
-                'daily'      => $this->dailyHeatmap($shop->id, $productFilter),
-                'weekly'     => $this->weeklyTrend($shop->id, $productFilter),
-                'dayOfMonth' => $this->dayOfMonthPattern($shop->id, $productFilter),
-                'dayOfWeek'  => $this->dayOfWeekPattern($shop->id, $productFilter),
-                'monthly'    => $this->monthlySummary($shop->id, $productFilter),
+                'daily'      => $this->dailyHeatmap($shop->id, $productFilter, $dateFrom, $dateTo),
+                'weekly'     => $this->weeklyTrend($shop->id, $productFilter, $dateFrom, $dateTo),
+                'dayOfMonth' => $this->dayOfMonthPattern($shop->id, $productFilter, $dateFrom, $dateTo),
+                'dayOfWeek'  => $this->dayOfWeekPattern($shop->id, $productFilter, $dateFrom, $dateTo),
+                'monthly'    => $this->monthlySummary($shop->id, $productFilter, $dateFrom, $dateTo),
             ];
         });
 
-        return view('analytics.seasonal', compact('shop', 'products', 'productFilter', 'data'));
+        return view('analytics.seasonal', compact('shop', 'products', 'productFilter', 'dateFrom', 'dateTo', 'datePreset', 'data'));
     }
 
     // Returns extra AND clause + appends product param to $params array
@@ -55,10 +58,28 @@ class SeasonalTrendController extends Controller
         return "AND EXISTS (SELECT 1 FROM json_each(o.items) AS item WHERE json_extract(item.value, '$.variation_info.name') = ? COLLATE NOCASE)";
     }
 
-    private function dailyHeatmap(int $shopId, ?string $pf): array
+    private function withDates(?string $from, ?string $to, array &$params): string
+    {
+        $clause = '';
+        if ($from) { $params[] = $from; $clause .= " AND date(o.ordered_at) >= ?"; }
+        if ($to)   { $params[] = $to;   $clause .= " AND date(o.ordered_at) <= ?"; }
+        return $clause;
+    }
+
+    private function dailyHeatmap(int $shopId, ?string $pf, ?string $from, ?string $to): array
     {
         $params = [$shopId];
         $productClause = $this->withProduct($pf, $params);
+        $dateClause    = $this->withDates($from, $to, $params);
+
+        // Always show the last 52 weeks in the calendar; date filter narrows data within it
+        $heatmapStart = $from ?? date('Y-m-d', strtotime('-364 days'));
+        $heatmapEnd   = $to   ?? date('Y-m-d', strtotime('+1 day'));
+        array_unshift($params, $shopId); // reset — rebuild cleanly
+        $params = [$shopId];
+        $productClause = $this->withProduct($pf, $params);
+        $params[] = $heatmapStart;
+        $params[] = $heatmapEnd;
 
         $rows = DB::select("
             SELECT date(o.ordered_at) as day,
@@ -67,8 +88,7 @@ class SeasonalTrendController extends Controller
                    SUM(CASE WHEN o.status='delivered' THEN o.total_price ELSE 0 END) as revenue
             FROM orders o
             WHERE o.shop_id = ? AND o.ordered_at IS NOT NULL
-              AND o.ordered_at >= date('now', '-364 days')
-              AND o.ordered_at <= date('now', '+1 day')
+              AND date(o.ordered_at) >= ? AND date(o.ordered_at) <= ?
             {$productClause}
             GROUP BY day ORDER BY day
         ", $params);
@@ -84,10 +104,11 @@ class SeasonalTrendController extends Controller
         return $result;
     }
 
-    private function weeklyTrend(int $shopId, ?string $pf): array
+    private function weeklyTrend(int $shopId, ?string $pf, ?string $from, ?string $to): array
     {
         $params = [$shopId];
         $productClause = $this->withProduct($pf, $params);
+        $dateClause    = $this->withDates($from, $to, $params);
 
         $rows = DB::select("
             SELECT strftime('%Y-%W', o.ordered_at) as week,
@@ -97,8 +118,8 @@ class SeasonalTrendController extends Controller
                    SUM(CASE WHEN o.is_rts=1 THEN 1 ELSE 0 END) as rts,
                    SUM(CASE WHEN o.status='delivered' THEN o.total_price ELSE 0 END) as revenue
             FROM orders o
-            WHERE o.shop_id = ? AND o.ordered_at IS NOT NULL AND o.ordered_at <= date('now')
-            {$productClause}
+            WHERE o.shop_id = ? AND o.ordered_at IS NOT NULL AND date(o.ordered_at) <= date('now')
+            {$productClause}{$dateClause}
             GROUP BY week ORDER BY week
         ", $params);
 
@@ -112,10 +133,11 @@ class SeasonalTrendController extends Controller
         ], $rows);
     }
 
-    private function dayOfMonthPattern(int $shopId, ?string $pf): array
+    private function dayOfMonthPattern(int $shopId, ?string $pf, ?string $from, ?string $to): array
     {
         $params = [$shopId];
         $productClause = $this->withProduct($pf, $params);
+        $dateClause    = $this->withDates($from, $to, $params);
 
         $rows = DB::select("
             SELECT CAST(strftime('%d', o.ordered_at) AS INTEGER) as dom,
@@ -123,8 +145,8 @@ class SeasonalTrendController extends Controller
                    SUM(CASE WHEN o.status='delivered' THEN 1 ELSE 0 END) as delivered,
                    SUM(CASE WHEN o.status='delivered' THEN o.total_price ELSE 0 END) as revenue
             FROM orders o
-            WHERE o.shop_id = ? AND o.ordered_at IS NOT NULL AND o.ordered_at <= date('now')
-            {$productClause}
+            WHERE o.shop_id = ? AND o.ordered_at IS NOT NULL AND date(o.ordered_at) <= date('now')
+            {$productClause}{$dateClause}
             GROUP BY dom ORDER BY dom
         ", $params);
 
@@ -139,10 +161,11 @@ class SeasonalTrendController extends Controller
         return $result;
     }
 
-    private function dayOfWeekPattern(int $shopId, ?string $pf): array
+    private function dayOfWeekPattern(int $shopId, ?string $pf, ?string $from, ?string $to): array
     {
         $params = [$shopId];
         $productClause = $this->withProduct($pf, $params);
+        $dateClause    = $this->withDates($from, $to, $params);
 
         $rows = DB::select("
             SELECT CAST(strftime('%w', o.ordered_at) AS INTEGER) as dow,
@@ -150,8 +173,8 @@ class SeasonalTrendController extends Controller
                    SUM(CASE WHEN o.status='delivered' THEN 1 ELSE 0 END) as delivered,
                    SUM(CASE WHEN o.status='delivered' THEN o.total_price ELSE 0 END) as revenue
             FROM orders o
-            WHERE o.shop_id = ? AND o.ordered_at IS NOT NULL AND o.ordered_at <= date('now')
-            {$productClause}
+            WHERE o.shop_id = ? AND o.ordered_at IS NOT NULL AND date(o.ordered_at) <= date('now')
+            {$productClause}{$dateClause}
             GROUP BY dow ORDER BY dow
         ", $params);
 
@@ -166,10 +189,11 @@ class SeasonalTrendController extends Controller
         return $result;
     }
 
-    private function monthlySummary(int $shopId, ?string $pf): array
+    private function monthlySummary(int $shopId, ?string $pf, ?string $from, ?string $to): array
     {
         $params = [$shopId];
         $productClause = $this->withProduct($pf, $params);
+        $dateClause    = $this->withDates($from, $to, $params);
 
         $rows = DB::select("
             SELECT strftime('%Y-%m', o.ordered_at) as month,
@@ -178,8 +202,8 @@ class SeasonalTrendController extends Controller
                    SUM(CASE WHEN o.is_rts=1 THEN 1 ELSE 0 END) as rts,
                    SUM(CASE WHEN o.status='delivered' THEN o.total_price ELSE 0 END) as revenue
             FROM orders o
-            WHERE o.shop_id = ? AND o.ordered_at IS NOT NULL AND o.ordered_at <= date('now')
-            {$productClause}
+            WHERE o.shop_id = ? AND o.ordered_at IS NOT NULL AND date(o.ordered_at) <= date('now')
+            {$productClause}{$dateClause}
             GROUP BY month ORDER BY month
         ", $params);
 

@@ -71,7 +71,7 @@ $retPct  = 100 - $newPct;
 </div>
 
 <!-- Charts Row 1 -->
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+<div class="grid grid-cols-1 gap-4 mb-4">
 
     <div class="bg-white rounded-xl shadow-sm p-5 flex flex-col" style="border:1px solid #DBEAFE;">
         <h3 class="text-sm font-semibold mb-0.5" style="color:#1E293B;">Gender Distribution</h3>
@@ -117,22 +117,6 @@ $retPct  = 100 - $newPct;
         </div>
     </div>
 
-    <div class="bg-white rounded-xl shadow-sm p-5" style="border:1px solid #DBEAFE;">
-        <h3 class="text-sm font-semibold mb-0.5" style="color:#1E293B;">Order Frequency</h3>
-        <p class="text-xs mb-4" style="color:#94A3B8;">How many orders each customer placed</p>
-        <div class="chart-wrap" style="min-height:200px;">
-            <div class="chart-skeleton" id="sk-freq">
-                <div style="display:flex;align-items:flex-end;gap:8px;height:160px;padding-top:20px;">
-                    <div class="sk-bar" style="flex:1;height:80%;"></div>
-                    <div class="sk-bar" style="flex:1;height:30%;"></div>
-                    <div class="sk-bar" style="flex:1;height:15%;"></div>
-                    <div class="sk-bar" style="flex:1;height:8%;"></div>
-                    <div class="sk-bar" style="flex:1;height:5%;"></div>
-                </div>
-            </div>
-            <canvas id="ageChart" class="chart-canvas" height="200"></canvas>
-        </div>
-    </div>
 
 </div>
 
@@ -509,17 +493,6 @@ window.__charts.gender = new Chart(document.getElementById('genderChart'), {
 });
 revealChart('genderChart', 'sk-gender');
 
-// Order Frequency
-window.__charts.age = new Chart(document.getElementById('ageChart'), {
-    type: 'bar',
-    data: { labels: ageData.labels, datasets: [{ label: 'Customers', data: ageData.data, backgroundColor: BLUE, borderRadius: 5, borderSkipped: false }] },
-    options: {
-        responsive: true,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${ctx.raw.toLocaleString()} customers` } } },
-        scales: { x: { grid: { display: false }, ticks: { font: tickFont, color: tickColor } }, y: { grid: { color: gridColor }, ticks: { font: tickFont, color: tickColor } } }
-    }
-});
-revealChart('ageChart', 'sk-freq');
 
 // Acquisition by Month
 window.__charts.birthday = new Chart(document.getElementById('birthdayChart'), {
@@ -671,11 +644,6 @@ window.__ajaxFilterUpdate = async function (form, params, url) {
             </div>
         </div>`;
     }).join('');
-
-    // Order Frequency chart
-    window.__charts.age.data.labels = d.ageStats.labels;
-    window.__charts.age.data.datasets[0].data = d.ageStats.data;
-    window.__charts.age.update();
 
     // Age Groups chart
     if (window.__charts.ageGroups) {
